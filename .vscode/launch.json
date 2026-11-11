@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:muster}",
+            "name": "Debug Muster",
+            "target": "Muster",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Muster"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:muster}",
+            "name": "Release Muster",
+            "target": "Muster",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Muster"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:muster}",
+            "name": "Debug muster-hook",
+            "target": "muster-hook",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug muster-hook"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:muster}",
+            "name": "Release muster-hook",
+            "target": "muster-hook",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release muster-hook"
+        }
+    ]
+}
