@@ -26,8 +26,8 @@ struct EnvironmentView: View {
             }
             if env.items.isEmpty {
                 VStack(spacing: 4) {
-                    Text(env.plan == nil ? "Scanning…" : "Nothing to clean up").fontWeight(.semibold)
-                    Text("Listening ports, orphaned processes and stale worktrees from agent sessions show up here")
+                    Text(env.plan == nil ? L10n.t("Scanning…") : L10n.t("Nothing to clean up")).fontWeight(.semibold)
+                    Text(L10n.t("Listening ports, orphaned processes and stale worktrees from agent sessions show up here"))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -35,9 +35,9 @@ struct EnvironmentView: View {
                 .padding(.vertical, 40)
                 .padding(.horizontal, 16)
             } else {
-                section("Listening ports", listeners)
-                section("Orphaned processes", orphans)
-                section("Stale worktrees", worktrees)
+                section(L10n.t("Listening ports"), listeners)
+                section(L10n.t("Orphaned processes"), orphans)
+                section(L10n.t("Stale worktrees"), worktrees)
                 PlanBox(env: env)
             }
         }
@@ -87,40 +87,40 @@ private struct CleanupRow: View {
     }
 
     private var projectName: (String) -> String {
-        { id in model.sessions.first(where: { $0.id == id })?.projectName ?? "unknown" }
+        { id in model.sessions.first(where: { $0.id == id })?.projectName ?? L10n.t("unknown") }
     }
 
     private var text: (main: Text, sub: Text) {
         switch item.action {
         case .terminate(let t):
-            let name = t.name ?? "process"
+            let name = t.name ?? L10n.t("process")
             if t.kind == .listener {
                 let ports = t.ports.map { ":\($0)" }.joined(separator: " ")
                 return (Text(ports).font(.system(size: 12, design: .monospaced)) + Text("  \(name)"),
                         Text("\(projectName(t.sessionID)) · pid \(t.identity.pid)"))
             }
             return (Text(name) + Text("  pid \(t.identity.pid)").font(.system(size: 12, design: .monospaced)),
-                    Text("Orphaned from \(projectName(t.sessionID))"))
+                    Text(L10n.t("Orphaned from %@", projectName(t.sessionID))))
         case .pruneWorktrees(let repo):
-            return (Text("Prune stale worktrees"), Text((repo as NSString).abbreviatingWithTildeInPath))
+            return (Text(L10n.t("Prune stale worktrees")), Text((repo as NSString).abbreviatingWithTildeInPath))
         case .removeWorktreeDirectory(_, let path):
             return (Text((path as NSString).abbreviatingWithTildeInPath).font(.system(size: 12, design: .monospaced)),
-                    Text("Merged worktree directory"))
+                    Text(L10n.t("Merged worktree directory")))
         }
     }
 
     @ViewBuilder private var trailing: some View {
         if item.needsExplicitConfirmation && isSelected {
-            Button(isConfirmed ? "Confirmed" : "Confirm") { env.toggleConfirmed(item.id) }
+            Button(isConfirmed ? L10n.t("Confirmed") : L10n.t("Confirm")) { env.toggleConfirmed(item.id) }
                 .buttonStyle(PillButtonStyle(kind: isConfirmed ? .secondary : .primary))
         } else if let c = item.confidence {
-            Text(item.isUncertain ? "Uncertain" : "\(Int((c * 100).rounded()))%")
+            Text(item.isUncertain ? L10n.t("Uncertain") : "\(Int((c * 100).rounded()))%")
                 .foregroundStyle(item.isUncertain ? Color.orange : Color.secondary)
                 .monospacedDigit()
         } else if case .removeWorktreeDirectory = item.action {
-            Text("Needs confirmation").foregroundStyle(.secondary)
+            Text(L10n.t("Needs confirmation")).foregroundStyle(.secondary)
         } else {
-            Text("Prune").foregroundStyle(.secondary)
+            Text(L10n.t("Prune")).foregroundStyle(.secondary)
         }
     }
 }
@@ -131,7 +131,7 @@ private struct PlanBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(env.commandTexts.isEmpty ? "Nothing selected" : env.commandTexts.joined(separator: "\n"))
+            Text(env.commandTexts.isEmpty ? L10n.t("Nothing selected") : env.commandTexts.joined(separator: "\n"))
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
@@ -139,7 +139,7 @@ private struct PlanBox: View {
             HStack {
                 Text(hint).font(.subheadline).foregroundStyle(.secondary)
                 Spacer()
-                Button(env.isBusy ? "Working…" : "Clean up \(env.selectedItems.count)") { env.execute() }
+                Button(env.isBusy ? L10n.t("Working…") : L10n.t("Clean up %d", env.selectedItems.count)) { env.execute() }
                     .buttonStyle(PillButtonStyle(kind: .primary))
                     .disabled(!env.canExecute)
             }
@@ -153,8 +153,10 @@ private struct PlanBox: View {
 
     private var hint: String {
         env.unconfirmedCount > 0
-            ? "Confirm \(env.unconfirmedCount) highlighted item\(env.unconfirmedCount == 1 ? "" : "s") first"
-            : "These commands are exactly what runs"
+            ? L10n.t(env.unconfirmedCount == 1
+                ? "Confirm %d highlighted item first"
+                : "Confirm %d highlighted items first", env.unconfirmedCount)
+            : L10n.t("These commands are exactly what runs")
     }
 }
 
@@ -165,9 +167,9 @@ private struct ReportCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Cleanup result").fontWeight(.semibold)
+                Text(L10n.t("Cleanup result")).fontWeight(.semibold)
                 Spacer()
-                Button("Dismiss", action: dismiss).buttonStyle(PillButtonStyle(kind: .quiet))
+                Button(L10n.t("Dismiss"), action: dismiss).buttonStyle(PillButtonStyle(kind: .quiet))
             }
             ForEach(Array(report.entries.enumerated()), id: \.offset) { _, entry in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -189,21 +191,23 @@ private struct ReportCard: View {
 
     private var summary: String? {
         var parts: [String] = []
-        if !report.freedPorts.isEmpty { parts.append("ports signalled: " + report.freedPorts.map(String.init).joined(separator: ", ")) }
-        if !report.prunedRepositories.isEmpty { parts.append("\(report.prunedRepositories.count) repo pruned") }
-        if !report.removedDirectories.isEmpty { parts.append("\(report.removedDirectories.count) directory removed") }
+        if !report.freedPorts.isEmpty {
+            parts.append(L10n.t("ports signalled: %@", report.freedPorts.map(String.init).joined(separator: ", ")))
+        }
+        if !report.prunedRepositories.isEmpty { parts.append(L10n.t("%d repo pruned", report.prunedRepositories.count)) }
+        if !report.removedDirectories.isEmpty { parts.append(L10n.t("%d directory removed", report.removedDirectories.count)) }
         if report.reclaimedBytes > 0 {
-            parts.append(ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file) + " reclaimed")
+            parts.append(L10n.t("%@ reclaimed", ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func outcomeText(_ o: CleanupOutcome) -> String {
         switch o {
-        case .done: return "Done"
-        case .termSent: return "SIGTERM sent"
-        case .refused(let r): return "Refused: " + refusalText(r)
-        case .failed(let m): return "Failed: \(m)"
+        case .done: return L10n.t("Done")
+        case .termSent: return L10n.t("SIGTERM sent")
+        case .refused(let r): return L10n.t("Refused: %@", refusalText(r))
+        case .failed(let m): return L10n.t("Failed: %@", m)
         }
     }
 
@@ -217,16 +221,16 @@ private struct ReportCard: View {
 
     private func refusalText(_ r: CleanupRefusal) -> String {
         switch r {
-        case .invalidPID: return "protected pid"
-        case .ownProcess: return "this app"
-        case .processGone: return "already gone"
-        case .identityChanged: return "pid was reused"
-        case .notInSessionTree: return "not in the session's process tree"
-        case .uncertainOwnership: return "ownership uncertain"
-        case .confirmationRequired: return "needs confirmation"
-        case .notTerminatedByUs: return "not terminated by us"
-        case .gracePeriodNotElapsed: return "grace period not over"
-        case .unsafePath: return "unsafe path"
+        case .invalidPID: return L10n.t("protected pid")
+        case .ownProcess: return L10n.t("this app")
+        case .processGone: return L10n.t("already gone")
+        case .identityChanged: return L10n.t("pid was reused")
+        case .notInSessionTree: return L10n.t("not in the session's process tree")
+        case .uncertainOwnership: return L10n.t("ownership uncertain")
+        case .confirmationRequired: return L10n.t("needs confirmation")
+        case .notTerminatedByUs: return L10n.t("not terminated by us")
+        case .gracePeriodNotElapsed: return L10n.t("grace period not over")
+        case .unsafePath: return L10n.t("unsafe path")
         }
     }
 }

@@ -15,14 +15,14 @@ struct SessionsView: View {
     var body: some View {
         if visible.isEmpty {
             VStack(spacing: 4) {
-                Text("No active sessions").fontWeight(.semibold)
-                Text("Sessions from Claude Code show up here").foregroundStyle(.secondary)
+                Text(L10n.t("No active sessions")).fontWeight(.semibold)
+                Text(L10n.t("Sessions from Claude Code show up here")).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 48)
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Active")
+                Text(L10n.t("Active"))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 12)
@@ -65,7 +65,7 @@ private struct SessionRow: View {
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
-            .help("Focus this session's terminal window. If it cannot be found, the folder path is copied.")
+            .help(L10n.t("Focus this session's terminal window. If it cannot be found, the folder path is copied."))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -74,11 +74,11 @@ private struct SessionRow: View {
     @ViewBuilder private var trailing: some View {
         switch session.state {
         case .waiting where pendingCount > 0:
-            Text(pendingCount == 1 ? "1 approval" : "\(pendingCount) approvals")
+            Text(pendingCount == 1 ? L10n.t("1 approval") : L10n.t("%d approvals", pendingCount))
         case .running:
-            Text(model.lastToolSummary(for: session.id) ?? "Running")
+            Text(model.lastToolSummary(for: session.id) ?? L10n.t("Running"))
         default:
-            Text("Idle ") + Text(session.lastActivityAt, style: .relative)
+            Text(L10n.t("Idle")) + Text(" ") + Text(session.lastActivityAt, style: .relative)
         }
     }
 

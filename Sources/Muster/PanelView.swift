@@ -45,13 +45,18 @@ struct PanelView: View {
     private var footer: some View {
         HStack(spacing: 0) {
             if let installed = model.hookInstalled {
-                Button(installed ? "Uninstall hook" : "Install hook") {
+                Button(installed ? L10n.t("Uninstall hook") : L10n.t("Install hook")) {
                     model.requestHook(installed ? .uninstall : .install)
                 }
                 .buttonStyle(PillButtonStyle(kind: .quiet))
             }
             Spacer()
-            Button { NSApplication.shared.terminate(nil) } label: { ShortcutLabel(title: "Quit", glyph: "⌘Q") }
+            Button { SettingsCoordinator.shared.show(model: model) } label: {
+                ShortcutLabel(title: L10n.t("Settings"), glyph: "⌘,")
+            }
+            .buttonStyle(PillButtonStyle(kind: .quiet))
+            .keyboardShortcut(",", modifiers: .command)
+            Button { NSApplication.shared.terminate(nil) } label: { ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q") }
                 .buttonStyle(PillButtonStyle(kind: .quiet))
                 .keyboardShortcut("q")
         }
@@ -61,14 +66,17 @@ struct PanelView: View {
 
     private func hookConfirm(_ action: PanelModel.HookAction) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(action == .install
-                 ? "Add the Muster PreToolUse hook to \(model.settingsPath)? A backup is made first."
-                 : "Remove only the Muster hook from \(model.settingsPath)? A backup is made first.")
-                .font(.subheadline)
+            Text(L10n.t(
+                action == .install
+                    ? "Add the Muster PreToolUse hook to %@? A backup is made first."
+                    : "Remove only the Muster hook from %@? A backup is made first.",
+                model.settingsPath
+            ))
+            .font(.subheadline)
             HStack {
-                Button("Confirm") { model.confirmHookAction() }
+                Button(L10n.t("Confirm")) { model.confirmHookAction() }
                     .buttonStyle(PillButtonStyle(kind: .primary))
-                Button("Cancel") { model.cancelHookAction() }
+                Button(L10n.t("Cancel")) { model.cancelHookAction() }
                     .buttonStyle(PillButtonStyle(kind: .secondary))
             }
         }

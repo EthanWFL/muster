@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Muster",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Muster", targets: ["Muster"]),
@@ -14,7 +15,11 @@ let package = Package(
         // 纯逻辑库，无 UI
         .target(name: "MusterCore", dependencies: ["MusterProtocol"]),
         // SwiftUI app，仅 UI + 装配
-        .executableTarget(name: "Muster", dependencies: ["MusterCore", "MusterProtocol"]),
+        .executableTarget(
+            name: "Muster",
+            dependencies: ["MusterCore", "MusterProtocol"],
+            resources: [.process("Resources")]
+        ),
         // hook 客户端：只依赖 Protocol，冷启动要快
         .executableTarget(name: "muster-hook", dependencies: ["MusterProtocol"]),
         .testTarget(name: "MusterProtocolTests", dependencies: ["MusterProtocol"]),

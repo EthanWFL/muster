@@ -25,6 +25,17 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN/Muster" "$BIN/muster-hook" "$CONTENTS/MacOS/"
 cp Resources/Info.plist "$CONTENTS/Info.plist"
+if [[ -d "$BIN/Muster_Muster.bundle" ]]; then
+    cp -R "$BIN/Muster_Muster.bundle" "$CONTENTS/Resources/"
+    # Bundle.main looks up Localizable.strings in Contents/Resources/<lang>.lproj.
+    for lproj in "$BIN/Muster_Muster.bundle"/*.lproj; do
+        [[ -d "$lproj" ]] || continue
+        name="$(basename "$lproj")"
+        # SwiftPM lowercases language directories; CFBundleLocalizations expects zh-Hans.
+        if [[ "$name" == "zh-hans.lproj" ]]; then name="zh-Hans.lproj"; fi
+        cp -R "$lproj" "$CONTENTS/Resources/$name"
+    done
+fi
 if [[ -f Resources/AppIcon.icns ]]; then
     cp Resources/AppIcon.icns "$CONTENTS/Resources/AppIcon.icns"
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$CONTENTS/Info.plist"
@@ -41,6 +52,7 @@ echo "Built $APP (version $VERSION, ad-hoc signed)"
 
 if [[ "$MAKE_DMG" == "1" ]]; then
     rm -f "dist/Muster-$VERSION.dmg"
-    hdiutil create -quiet -volname "Muster" -srcfolder "$APP" -ov -format UDZO "dist/Muster-$VERSION.dmg"
+    # Redirect: hdiutil spawns a helper that can inherit the caller's stdout and keep a pipe open.
+    hdiutil create -quiet -volname "Muster" -srcfolder "$APP" -ov -format UDZO "dist/Muster-$VERSION.dmg" >/dev/null 2>&1
     echo "Built dist/Muster-$VERSION.dmg"
 fi

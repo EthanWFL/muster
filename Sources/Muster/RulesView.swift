@@ -12,9 +12,9 @@ struct RulesView: View {
             }
             if rules.findings.isEmpty {
                 VStack(spacing: 4) {
-                    Text(rules.isScanning ? "Scanning…" : rules.hasScanned ? "No findings" : "Not scanned yet")
+                    Text(rules.isScanning ? L10n.t("Scanning…") : rules.hasScanned ? L10n.t("No findings") : L10n.t("Not scanned yet"))
                         .fontWeight(.semibold)
-                    Text("Duplicate rules, broken references and conflicts across your repos show up here")
+                    Text(L10n.t("Duplicate rules, broken references and conflicts across your repos show up here"))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -32,7 +32,7 @@ struct RulesView: View {
         HStack {
             Text(summary).font(.subheadline).foregroundStyle(.secondary)
             Spacer()
-            Button("Rescan") { rules.scan() }
+            Button(L10n.t("Rescan")) { rules.scan() }
                 .buttonStyle(PillButtonStyle(kind: .quiet))
                 .disabled(rules.isScanning)
         }
@@ -41,11 +41,14 @@ struct RulesView: View {
     }
 
     private var summary: String {
-        if rules.isScanning { return "Scanning \(rules.scanner.config.root.abbreviatedPath)…" }
+        if rules.isScanning { return L10n.t("Scanning %@…", rules.scanner.config.root.abbreviatedPath) }
         guard rules.hasScanned else { return rules.scanner.config.root.abbreviatedPath }
         let n = rules.findings.count
         let files = rules.scannedFiles
-        return "\(n) finding\(n == 1 ? "" : "s") in \(files) rule file\(files == 1 ? "" : "s")"
+        if n == 1 {
+            return L10n.t("1 finding in %d rule files", files)
+        }
+        return L10n.t("%d findings in %d rule files", n, files)
     }
 }
 
@@ -57,12 +60,12 @@ private struct FindingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(finding.kind.rawValue)
+                Text(L10n.t(finding.kind.rawValue))
                     .font(.subheadline).foregroundStyle(.secondary)
                     .frame(width: 64, alignment: .leading)
                 Text(finding.title).lineLimit(2)
                 Spacer(minLength: 8)
-                Button(copied ? "Copied" : "Copy fix") {
+                Button(copied ? L10n.t("Copied") : L10n.t("Copy fix")) {
                     rules.copy(finding)
                     copied = true
                     Task {
@@ -82,7 +85,7 @@ private struct FindingRow: View {
                             .truncationMode(.head)
                     }
                     .buttonStyle(.plain)
-                    .help("Open the file")
+                    .help(L10n.t("Open the file"))
                 }
             }
             .padding(.leading, 72)

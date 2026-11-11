@@ -28,11 +28,27 @@ final class PanelModel: ObservableObject {
     }
 
     private let terminalJumper = TerminalJumper()
+    private let notifications = NotificationService()
+    private var notifiedCallIDs: Set<String> = []
+
+    /// Set by the app delegate so a notification click can reveal the panel.
+    var onOpenPanelRequest: (() -> Void)? {
+        didSet { notifications.onOpen = onOpenPanelRequest }
+    }
 
     enum HookAction { case install, uninstall }
 
     enum Tab: String, CaseIterable {
         case approvals = "Approvals", sessions = "Sessions", environment = "Environment", rules = "Rules"
+
+        var title: String {
+            switch self {
+            case .approvals: return L10n.t("Approvals")
+            case .sessions: return L10n.t("Sessions")
+            case .environment: return L10n.t("Environment")
+            case .rules: return L10n.t("Rules")
+            }
+        }
     }
     @Published var tab: Tab = .approvals
 
@@ -58,6 +74,7 @@ final class PanelModel: ObservableObject {
     static let deniedReason = "Denied from Muster"
 
     func start() {
+        notifications.start()
         env.sessionsProvider = { [weak self] in self?.sessions ?? [] }
         env.startSampling()
         daemon.onChange = { [weak self] in
@@ -121,16 +138,16 @@ final class PanelModel: ObservableObject {
         do {
             try installer.addAllowRule(prompt.rule.text)
         } catch {
-            notice = "Could not save permanent rule: \(error)"
+            notice = L10n.t("Could not save permanent rule: %@", String(describing: error))
             return
         }
         reloadPermanentRules()
         do {
             daemon.resolve(try daemon.approvals.allow(id: prompt.callID))
             pendingPermanentAllow = nil
-            notice = "Always allowed · \(prompt.rule.text) saved to \(settingsPath)"
+            notice = L10n.t("Always allowed · %@ saved to %@", prompt.rule.text, settingsPath)
         } catch {
-            notice = "Rule saved, but the request is no longer pending"
+            notice = L10n.t("Rule saved, but the request is no longer pending")
         }
         refresh()
     }
@@ -141,7 +158,7 @@ final class PanelModel: ObservableObject {
         guard let id = selection,
               let call = pending.first(where: { $0.id == id }),
               let session = daemon.sessions.session(id: call.sessionID) else {
-            notice = "Session is not active"
+            notice = L10n.t("Session is not active")
             return
         }
         jumpToTerminal(session)
@@ -158,12 +175,12 @@ final class PanelModel: ObservableObject {
     private func applyJumpResult(_ result: TerminalJumpResult) {
         switch result {
         case .focused(let app, let tty):
-            notice = "Focused \(app) · \(tty)"
+            notice = L10n.t("Focused %@ · %@", app, tty)
         case .copied(let command):
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(command, forType: .string)
-            notice = "Terminal window not found · \(command) copied"
+            notice = L10n.t("Terminal window not found · %@ copied", command)
         }
     }
 
@@ -182,7 +199,7 @@ final class PanelModel: ObservableObject {
             notice = nil
         } catch {
             // 条目可能刚好超时或连接已断：刷新即可，不算错误
-            notice = "Request is no longer pending"
+            notice = L10n.t("Request is no longer pending")
         }
         refresh()
     }
@@ -206,7 +223,7 @@ final class PanelModel: ObservableObject {
             }
             notice = nil
         } catch {
-            notice = "Hook change failed: \(error)"
+            notice = L10n.t("Hook change failed: %@", String(describing: error))
         }
         refreshHookState()
         reloadPermanentRules()
@@ -239,6 +256,12 @@ final class PanelModel: ObservableObject {
     private func refresh() {
         pending = daemon.approvals.pending
         sessions = daemon.sessions.sessions()
+        let liveIDs = Set(pending.map(\.id))
+        notifiedCallIDs.formIntersection(liveIDs)
+        for call in pending where !notifiedCallIDs.contains(call.id) {
+            notifiedCallIDs.insert(call.id)
+            notifications.notify(call)
+        }
         if let prompt = pendingPermanentAllow, !pending.contains(where: { $0.id == prompt.callID }) {
             pendingPermanentAllow = nil
         }
@@ -259,7 +282,7 @@ final class PanelModel: ObservableObject {
             self.server = server
         } catch {
             // 没有 socket 时 hook 连不上，agent 照常走原生确认，所以这里只提示、不退出
-            notice = "Approval socket unavailable: \(error)"
+            notice = L10n.t("Approval socket unavailable: %@", String(describing: error))
         }
     }
 

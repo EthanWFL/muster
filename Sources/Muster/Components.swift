@@ -63,7 +63,7 @@ struct SegmentedTabs: View {
             ForEach(PanelModel.Tab.allCases, id: \.self) { tab in
                 Button { selection = tab } label: {
                     HStack(spacing: 4) {
-                        Text(tab.rawValue)
+                        Text(tab.title)
                         if let n = badges[tab], n > 0 {
                             Text("\(n)")
                                 .font(.system(size: 11, weight: .semibold))
@@ -128,7 +128,7 @@ enum ToolDetail {
             let s = line.count > maxLineLength ? String(line.prefix(maxLineLength)) + "…" : String(line)
             return DetailLine(kind: kind, text: prefix + s)
         }
-        if all.count > maxLines { out.append(DetailLine(kind: .context, text: "  … \(all.count - maxLines) more lines")) }
+        if all.count > maxLines { out.append(DetailLine(kind: .context, text: "  … " + L10n.t("%d more lines", all.count - maxLines))) }
         return out
     }
 }

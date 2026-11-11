@@ -43,7 +43,7 @@ final class RulesModel: ObservableObject {
                 stats = report.stats
                 scannedFiles = report.files.count
             } catch {
-                errorMessage = "Scan failed: \(error)"
+                errorMessage = L10n.t("Scan failed: %@", String(describing: error))
             }
             isScanning = false
             hasScanned = true

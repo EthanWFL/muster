@@ -63,19 +63,29 @@ final class StatusItemController: NSObject {
 
         let count = model.pending.count
         let menu = NSMenu()
-        menu.addItem(item("Open Muster", #selector(openPanel)))
-        let status = NSMenuItem(title: count > 0 ? "\(count) approvals waiting" : "No pending approvals", action: nil, keyEquivalent: "")
+        menu.addItem(item(L10n.t("Open Muster"), #selector(openPanel)))
+        let status = NSMenuItem(
+            title: count > 0
+                ? L10n.t("%d approvals waiting", count)
+                : L10n.t("No pending approvals"),
+            action: nil,
+            keyEquivalent: ""
+        )
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(.separator())
-        menu.addItem(item("Settings…", #selector(openSettings), key: ","))
-        menu.addItem(item("Install/Repair Hook", #selector(installHook)))
-        menu.addItem(item("Check for Updates…", #selector(checkForUpdates)))
+        menu.addItem(item(L10n.t("Settings…"), #selector(openSettings), key: ","))
+        menu.addItem(item(L10n.t("Install/Repair Hook"), #selector(installHook)))
+        menu.addItem(item(L10n.t("Check for Updates…"), #selector(checkForUpdates)))
         menu.addItem(.separator())
-        let version = NSMenuItem(title: "Version 0.1.0", action: nil, keyEquivalent: "")
+        let version = NSMenuItem(
+            title: L10n.t("Version %@", SettingsStore.shared.appVersion),
+            action: nil,
+            keyEquivalent: ""
+        )
         version.isEnabled = false
         menu.addItem(version)
-        menu.addItem(item("Quit Muster", #selector(quit), key: "q"))
+        menu.addItem(item(L10n.t("Quit Muster"), #selector(quit), key: "q"))
 
         // 临时挂菜单才能弹出；performClick 结束后立即摘掉，否则之后左键也会走菜单
         statusItem.menu = menu
