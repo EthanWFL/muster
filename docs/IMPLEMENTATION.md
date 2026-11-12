@@ -38,7 +38,6 @@
 │                     │                                    │
 │ AgentAdapter(s) ─▶ SessionStore                          │
 │ ProcessScanner / WorktreeScanner ─▶ CleanupPlanner       │
-│ RuleScanner                                              │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +60,6 @@ Sources/
     Adapters/              # AgentAdapter + ClaudeAdapter + CodexAdapter
     Approval/              # ApprovalStore, RiskClassifier, SimilarRule
     Cleanup/               # ProcessScanner, OwnershipHeuristic, WorktreeScanner, CleanupPlan
-    Rules/                 # RuleScanner, Jaccard, RefChecker
     Support/               # Logger(轮转), Paths, Clock(可注入)
   Muster/              # 可执行：SwiftUI app，仅 UI + 装配
   muster-hook/         # 可执行：hook 客户端，仅依赖 Protocol 的极小子集
@@ -191,17 +189,41 @@ PRD 估时 7.5 天，考虑 Swift 菜单栏 app 的焦点/键盘坑与无 Xcode 
 - [ ] 3 个失效 worktree 的仓库 prune 后状态正确
 - [ ] 零误杀测试：构造一批非 agent 进程（含同 cwd 前缀的无关进程、PID 复用场景、pid=1、自身），**断言 Executor 一律拒绝**
 
-### M4 — 规则扫描（1～1.5d）
+### M4 — 规则扫描（已下线）
 
-1. `RuleScanner`：遍历根目录（默认 `~/Code`，可配置、可排除 `node_modules`/`.git`/`.build`），找四类文件；按 mtime 缓存解析结果做增量（R11）。
-2. 条目切分：按列表项/段落切成条目，记录 `文件:行号`。（R12：不做代码块之外的深度 Markdown 语义。）
-3. 重复：规范化（小写、去标点、去停用词）→ token Jaccard > 0.8；先用 token 数量/首词做**分桶**避免 O(n²)。
-4. 失效引用：提取反引号内容，区分「路径」与「命令」两种启发式；路径用 `FileManager`（相对路径相对于该文件所在仓库根），命令用 `which`/`PATH` 查找。**宁可漏报不要误报**：形如 `foo.bar`、含空格的表达式、占位符 `<x>`、glob 一律跳过。
-4. 跨仓库矛盾：**只对白名单主题**（pnpm/npm/yarn/bun、tabs/spaces 等）做「必须/禁止」「用 X/用 Y」匹配，主题词表做成可配置数据。
-5. 扫描在后台 `Task`/队列执行，UI 显示进度；点击条目用 `NSWorkspace` 打开文件，行号跳转尽力而为（无通用方案，可退化为复制 `path:line`）。
-6. 「复制建议」只写剪贴板（R10），**全程不写任何规则文件**。
+原本要做的事：跨仓库扫 `CLAUDE.md` / `AGENTS.md` / `.cursorrules` / `.github/copilot-instructions.md`，报重复规则、失效引用、跨仓库冲突。
 
-**验收**：造 2 条重复规则 → 识别并给两处行号；不存在的路径标红；10 个仓库 < 3s；扫描期间 UI 不卡。
+2026-11-12 决定整块下线：这个页面真正的目标其实是「一份规则同步到本机所有 agent」，而那件事由 `M4.5 指令同步` 直接完成了。因此删掉了：
+
+- `MusterCore/Rules/*`（RuleScanner、DuplicateDetector、RefChecker、ContradictionDetector、RuleParser、RuleSuggestion、RuleTextNormalizer 及其测试）
+- `Muster/RulesView.swift`、`Muster/RulesModel.swift`、`Rules` tab，以及「忽略」用的 `MusterIgnoredFindings`
+
+`~/Code` 下的仓库级 `AGENTS.md` 仍然**只读不写**（那是 git 跟踪文件，改动应该走 diff/review）。要重新引入，从 git 历史里取回即可。
+
+### 设置页
+
+设置并进面板，不再开独立窗口：
+
+- 面板页脚「设置 ⌘,」切换 `PanelModel.showsSettings`，内容区换成 `SettingsView`（启动 / 外观 / 标签顺序 / 快捷键 / 审批 / 更新 / 关于，一屏滚动），顶部 tab 条隐藏；⎋ 或「返回」退回主视图。
+- 旧实现走 `NSApp.sendAction(showSettingsWindow:)` 开 SwiftUI `Settings` 场景，在 accessory App（无 Dock 图标）里经常只返回 true 不弹窗，已删除。
+- 标签顺序存在 `UserDefaults` 的 `MusterTabOrder`，面板 tab 条按它渲染，未知值丢弃、新增 tab 自动补到末尾。
+
+### M4.5 — 指令同步（「指令」页）
+
+一份共享指令写进各 agent 的**用户级**指令文件，参考 magpie 的标记块实现（`internal/library/instructions.go`）。
+
+- `AgentCatalog`（`InstructionTargets`）：agent → 指令文件路径，尊重 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `PI_CODING_AGENT_DIR` / `DSH_HOME`；已存在的优先，没装的不写。Codex / Pi 存在 `AGENTS.override.md` 时它优先级更高，直接指向它（`redirectedFrom` 记着被取代的 `AGENTS.md`），否则写进 `AGENTS.md` 会被盖掉。
+- `InstructionBlock`：`split` / `own` / `withBlock` / `ownLineCount` / `hash`。段由 `<!-- muster:begin … -->` 与 `<!-- muster:end -->` 框住，追加在用户已有内容之后；撤销时只撤这一段。
+- `InstructionSync`：`plan`（只读，算出写入后的整份文件 + 动作）与 `apply`（先备份到 `~/Library/Application Support/Muster/backups/<ts>/<agent>/`，保留 10 份，原子写）。
+- 多套指令：默认那套在 `instructions.md`，其余在 `instruction-sets/<id>.md`；`instructions.json` 记 `activeSet` 与 `sets`，切换一套 = 换写入的文本（旧的解码走 `decodeIfPresent`，不会把开关丢掉）。
+- 状态 `instructions.json` 记录开关与上次写入的段指纹，用来识别手改。
+- 备份回滚：每次写前留一份原文件（`backups/<时间戳带毫秒>/<agent>/<文件名>` + `manifest.json` 记原始路径与时间，保留 10 份）；某行的预览里可以直接「恢复」，恢复前会先把当前文件再备份一次，所以恢复本身也能撤销。
+- 编辑即存：改完 1.2 秒落盘到当前这套的文件，退出 App 不丢；「保存」只是立刻落盘的按钮。
+- 多套指令可新建 / 重命名 / 删除；删掉的只是这套的文本文件，默认那套不能删。
+- 切换一套会把新文本直接写进已开启的 agent（换套即生效）。
+- 预览有两种：段 diff（`-`/`+`）和整份写入后的文件，用来确认段落在文件里的位置。
+- 三条安全线：共享指令为空时绝不自动撤段（库被重置不等于用户要撤销）、文件读不到视为未知不写、只由用户关开关才撤段。
+- 仓库级 `AGENTS.md` 只生成/复制，不自动写（会改 git 跟踪文件）。
 
 ### M5 — 打包、签名、更新、引导（1～2d）
 
@@ -310,7 +332,7 @@ PRD 估时 7.5 天，考虑 Swift 菜单栏 app 的焦点/键盘坑与无 Xcode 
 
 ```
 M0 验证（先出结论）
- └─ 通过 → M1 骨架/会话 → M2 审批 → M3 清理/跳转 → M4 规则 → M5 打包
+ └─ 通过 → M1 骨架/会话 → M2 审批 → M3 清理/跳转 → M4 指令同步 → M5 打包
  └─ 不通过 → 暂停，重评审 F1 的方案
 ```
 
