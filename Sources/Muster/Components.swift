@@ -154,8 +154,9 @@ struct Card<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) { content }
-            .background(T.card)
-            .clipShape(RoundedRectangle(cornerRadius: T.r, style: .continuous))
+            // 圆角只作用在背景上（不 clip 子树），下拉浮层才能溢出卡片边界
+            .background(
+                RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
             .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
                 .strokeBorder(T.line, lineWidth: 0.5))
     }
@@ -267,13 +268,17 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
     let label: (Item) -> String
     var header: String?
     var width: CGFloat = 168
+    /// 展开方向：`.leading` 让列表从按钮左边缘往右展开（面板左侧的入口用），
+    /// `.trailing` 让列表右对齐（设置页右侧的入口用）
+    var alignment: HorizontalAlignment = .trailing
     @Binding var selection: Item
     @ViewBuilder var footer: () -> Footer
 
     @State private var open = false
+    @State private var closeTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: T.s1) {
+        VStack(alignment: alignment, spacing: T.s1) {
             Button {
                 withAnimation(.snappy(duration: 0.16)) { open.toggle() }
             } label: {
@@ -289,10 +294,27 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                 .overlay(Capsule().strokeBorder(T.line, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
-
-            if open { list }
+            // 浮层挂在按钮下方，不占布局：卡片高度不变，选项盖在内容之上
+            .overlay(alignment: alignment == .leading ? .topLeading : .topTrailing) {
+                if open {
+                    list
+                        .offset(y: 24 + T.s1)
+                        .transition(.opacity)
+                }
+            }
         }
-        .zIndex(open ? 1 : 0)
+        .zIndex(open ? 10 : 0)
+        // 指针离开按钮或浮层后收起；两者之间移动会被 0.35s 的缓冲接住
+        .onHover(perform: trackHover)
+    }
+
+    private func trackHover(_ inside: Bool) {
+        closeTask?.cancel()
+        guard !inside, open else { return }
+        closeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            if !Task.isCancelled { withAnimation(.snappy(duration: 0.16)) { open = false } }
+        }
     }
 
     private var list: some View {
@@ -329,18 +351,21 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
         }
         .padding(.vertical, T.s1)
         .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
         .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
         .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
             .strokeBorder(T.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 6)
+        .onHover(perform: trackHover)
     }
 }
 
 extension InlineSelect where Footer == EmptyView {
     init(items: [Item], label: @escaping (Item) -> String, header: String? = nil,
-         width: CGFloat = 168, selection: Binding<Item>) {
+         width: CGFloat = 168, alignment: HorizontalAlignment = .trailing,
+         selection: Binding<Item>) {
         self.init(items: items, label: label, header: header, width: width,
-                  selection: selection, footer: { EmptyView() })
+                  alignment: alignment, selection: selection, footer: { EmptyView() })
     }
 }
 

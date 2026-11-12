@@ -18,6 +18,8 @@ struct InstructionsView: View {
                 }
                 .padding(.horizontal, T.s3)
                 .frame(height: T.rowDouble)
+                // 浮层要盖住下面的编辑器
+                .zIndex(1)
 
                 Hairline()
                 if let editor = model.editor { nameEditor(editor) }
@@ -37,6 +39,7 @@ struct InstructionsView: View {
                     .padding(.horizontal, T.s3)
                     .padding(.vertical, T.s1)
             }
+            .zIndex(1)
 
             HStack(spacing: T.s2) {
                 SectionTitle(text: "AGENT", count: model.targets.count)
@@ -83,7 +86,7 @@ struct InstructionsView: View {
                 guard let set = model.sets.first(where: { $0.id == id }) else { return model.activeSetName }
                 return name(of: set)
             },
-            header: L10n.t("Shared instructions"),
+            alignment: .leading,
             selection: Binding(
                 get: { model.activeSetID },
                 set: { model.selectSet($0) })

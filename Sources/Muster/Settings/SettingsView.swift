@@ -62,8 +62,10 @@ struct SettingsView: View {
                             get: { store.language.rawValue },
                             set: { store.language = L10n.Language(rawValue: $0) ?? .system }))
                 }
+                .zIndex(1)
             }
         }
+        .zIndex(1)   // 语言下拉是浮层，整个分区要压在后续分区之上
     }
 
     private var tabOrder: some View {
