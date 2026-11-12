@@ -5,7 +5,8 @@
 "Nothing waiting" = "暂无待审批";
 "Requests from your agents appear here" = "代理的请求会显示在这里";
 "No active sessions" = "暂无活动会话";
-"Sessions from Claude Code show up here" = "Claude Code 的会话会显示在这里";
+"Open sessions of installed agents show up here" = "本机装过的 agent 打开的会话会显示在这里";
+"Rescan open sessions" = "重新扫描打开的会话";
 "Active" = "活动中";
 "Scanning…" = "扫描中…";
 "Nothing to clean up" = "没有可清理项";
@@ -128,6 +129,7 @@
 "Hook change failed: %@" = "Hook 修改失败：%@";
 "Approval socket unavailable: %@" = "审批 socket 不可用：%@";
 "%d more lines" = "还有 %d 行";
+"Ports, orphaned processes and stale worktrees left by agent sessions; tick and clean up." = "agent 会话留下的端口、孤儿进程和失效 worktree，勾选后一键清理。";
 "Listening ports, orphaned processes and stale worktrees from agent sessions show up here" = "代理会话产生的监听端口、孤立进程和过期工作树会显示在这里";
 "%ds" = "%d 秒";
 "已忽略 %d 条 · 恢复";
@@ -171,7 +173,11 @@
 "Created %@" = "已创建 %@";
 "This file overrides %@" = "这个文件会覆盖 %@";
 "AGENTS.override.md wins over AGENTS.md, so this is the file that takes effect." = "AGENTS.override.md 的优先级高于 AGENTS.md，所以写在这里才生效。";
-"Rename this set…" = "重命名这一套…";
+"New set" = "新建一套";
+"In use" = "使用中";
+"Set actions" = "套操作";
+"Expand" = "展开";
+"Collapse" = "收起";
 "Delete this set…" = "删除这一套…";
 "Delete “%@” and its text?" = "删除「%@」和它的文本？";
 "Delete" = "删除";

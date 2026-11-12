@@ -5,7 +5,8 @@
 "Nothing waiting" = "Nothing waiting";
 "Requests from your agents appear here" = "Requests from your agents appear here";
 "No active sessions" = "No active sessions";
-"Sessions from Claude Code show up here" = "Sessions from Claude Code show up here";
+"Open sessions of installed agents show up here" = "Open sessions of installed agents show up here";
+"Rescan open sessions" = "Rescan open sessions";
 "Active" = "Active";
 "Scanning…" = "Scanning…";
 "Nothing to clean up" = "Nothing to clean up";
@@ -128,6 +129,7 @@
 "Hook change failed: %@" = "Hook change failed: %@";
 "Approval socket unavailable: %@" = "Approval socket unavailable: %@";
 "%d more lines" = "%d more lines";
+"Ports, orphaned processes and stale worktrees left by agent sessions; tick and clean up." = "Ports, orphaned processes and stale worktrees left by agent sessions; tick and clean up.";
 "Listening ports, orphaned processes and stale worktrees from agent sessions show up here" = "Listening ports, orphaned processes and stale worktrees from agent sessions show up here";
 "%ds" = "%ds";
 "Restore" = "Restore";
@@ -170,7 +172,11 @@
 "Created %@" = "Created %@";
 "This file overrides %@" = "This file overrides %@";
 "AGENTS.override.md wins over AGENTS.md, so this is the file that takes effect." = "AGENTS.override.md wins over AGENTS.md, so this is the file that takes effect.";
-"Rename this set…" = "Rename this set…";
+"New set" = "New set";
+"In use" = "In use";
+"Set actions" = "Set actions";
+"Expand" = "Expand";
+"Collapse" = "Collapse";
 "Delete this set…" = "Delete this set…";
 "Delete “%@” and its text?" = "Delete “%@” and its text?";
 "Delete" = "Delete";

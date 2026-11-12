@@ -17,15 +17,10 @@ final class InstructionsModel: ObservableObject {
     /// 编辑中的文本：改完会自动存进当前这套，所以退出 App 也不丢。
     @Published var draft = "" { didSet { if draft != oldValue { scheduleSave() } } }
     @Published var expanded: Set<String> = []
-    /// 新建 / 重命名 / 删除确认，同一时间只开一个
-    @Published var editor: SetEditor?
+    /// 新建 / 删除确认，同一时间只开一个
+    @Published var creatingSet = false
     @Published var setName = ""
     @Published var confirmingDelete = false
-
-    enum SetEditor: Equatable {
-        case create
-        case rename
-    }
 
     private let sync = InstructionSync()
     private var saveTask: Task<Void, Never>?
@@ -38,6 +33,13 @@ final class InstructionsModel: ObservableObject {
             : (state.setNamed(activeSetID)?.name ?? "")
     }
     var isDefaultSet: Bool { activeSetID == InstructionSet.defaultID }
+
+    /// 列表里那行副标题：该套第一行内容（当前那套用未落盘的草稿）
+    func previewText(_ id: String) -> String {
+        let text = id == activeSetID ? draft : sync.text(id)
+        return text.split(separator: "\n", omittingEmptySubsequences: true)
+            .first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+    }
 
     func loadIfNeeded() {
         guard !hasLoaded else { return }
@@ -81,7 +83,7 @@ final class InstructionsModel: ObservableObject {
             activeSetID = set.id
             savedText = ""
             draft = ""
-            editor = nil
+            creatingSet = false
             setName = ""
             refreshPlans()
             notice = L10n.t("Created %@", name)
@@ -90,13 +92,14 @@ final class InstructionsModel: ObservableObject {
         }
     }
 
-    func renameSet() {
-        let name = setName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, let index = state.sets.firstIndex(where: { $0.id == activeSetID }) else { return }
+    /// 行内改名，失焦即调；默认那套名字固定
+    func renameSet(_ id: String, to newName: String) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, id != InstructionSet.defaultID,
+              let index = state.sets.firstIndex(where: { $0.id == id }),
+              state.sets[index].name != name else { return }
         state.sets[index].name = name
         persistState()
-        editor = nil
-        setName = ""
         notice = L10n.t("Renamed to %@", name)
     }
 

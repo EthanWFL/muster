@@ -9,6 +9,8 @@ import Foundation
 final class PanelModel: ObservableObject {
     @Published private(set) var pending: [ToolCall] = []
     @Published private(set) var sessions: [Session] = []
+    /// 进程扫出来的"正开着"的会话，和 hook/磁盘的会话在 refresh 里合并
+    private var liveSessions: [Session] = []
     @Published var selection: String?
     /// 面板底部的一行提示（socket 启动失败、操作失败等）
     @Published private(set) var notice: String?
@@ -42,6 +44,10 @@ final class PanelModel: ObservableObject {
         case approvals = "Approvals", sessions = "Sessions", environment = "Environment",
              instructions = "Instructions"
 
+        /// 审批页暂时下线：只接了 Claude，且全拦每个调用都要等 90 秒。
+        /// 等风险门（只拦高危）和多 agent 钩子做完再打开。
+        var isHidden: Bool { self == .approvals }
+
         var title: String {
             switch self {
             case .approvals: return L10n.t("Approvals")
@@ -59,8 +65,9 @@ final class PanelModel: ObservableObject {
     static let tabKey = "MusterLastTab"
 
     private static func storedTab() -> Tab {
-        guard let raw = UserDefaults.standard.string(forKey: tabKey) else { return .approvals }
-        return Tab(rawValue: raw) ?? .approvals
+        guard let raw = UserDefaults.standard.string(forKey: tabKey),
+              let tab = Tab(rawValue: raw), !tab.isHidden else { return .sessions }
+        return tab
     }
     /// 面板里正在显示设置页（不再是独立窗口）
     @Published var showsSettings = false
@@ -74,11 +81,11 @@ final class PanelModel: ObservableObject {
 
     /// 实际渲染用的顺序：存过的顺序 + 补齐新增的 tab
     var orderedTabs: [Tab] {
-        let known = Set(Tab.allCases)
+        let known = Set(Tab.allCases.filter { !$0.isHidden })
         var seen = Set<Tab>()
         var out: [Tab] = []
         for tab in tabOrder where known.contains(tab) && seen.insert(tab).inserted { out.append(tab) }
-        for tab in Tab.allCases where seen.insert(tab).inserted { out.append(tab) }
+        for tab in Tab.allCases where !tab.isHidden && seen.insert(tab).inserted { out.append(tab) }
         return out
     }
 
@@ -305,10 +312,11 @@ final class PanelModel: ObservableObject {
 
     private func refresh() {
         pending = daemon.approvals.pending
-        sessions = daemon.sessions.sessions()
+        sessions = mergedSessions()
         let liveIDs = Set(pending.map(\.id))
         notifiedCallIDs.formIntersection(liveIDs)
-        for call in pending where !notifiedCallIDs.contains(call.id) {
+        // 审批页隐藏时提醒没有意义：点开也处理不了，只会变成噪音
+        for call in pending where !Tab.approvals.isHidden && !notifiedCallIDs.contains(call.id) {
             notifiedCallIDs.insert(call.id)
             notifications.notify(call)
         }
@@ -317,6 +325,41 @@ final class PanelModel: ObservableObject {
         }
         if let s = selection, pending.contains(where: { $0.id == s }) { return }
         selection = pending.first?.id
+    }
+
+    /// 进程扫到的才算"开着"；能对上 pid 或目录的就并进已有那条，保留 hook 给的状态和 id
+    private func mergedSessions() -> [Session] {
+        var list = daemon.sessions.sessions().filter { $0.state != .ended }
+        for live in liveSessions {
+            if let index = list.firstIndex(where: {
+                $0.agent == live.agent
+                    && ($0.pid == live.pid || ($0.pid == nil && $0.cwd == live.cwd))
+            }) {
+                list[index].pid = live.pid
+                list[index].pidStartTime = live.pidStartTime
+                list[index].startedAt = min(list[index].startedAt, live.startedAt)
+            } else if !list.contains(where: { $0.id == live.id }) {
+                list.append(live)
+            }
+        }
+        return list
+    }
+
+    /// 手动刷新：马上重扫进程和磁盘
+    func refreshSessions() {
+        scanLive()
+        scanDisk()
+    }
+
+    private func scanLive() {
+        Task.detached(priority: .utility) {
+            let found = AgentProcessScanner().scan()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                liveSessions = found
+                refresh()
+            }
+        }
     }
 
     // MARK: - 启动
@@ -349,9 +392,13 @@ final class PanelModel: ObservableObject {
         refreshHookState()
         reloadPermanentRules()
         scanDisk()
+        scanLive()
         // 低频兜底；实时状态来自 hook 事件
         diskTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.scanDisk() }
+            Task { @MainActor in
+                self?.scanDisk()
+                self?.scanLive()
+            }
         }
     }
 

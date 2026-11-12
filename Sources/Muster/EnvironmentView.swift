@@ -20,6 +20,13 @@ struct EnvironmentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if !env.items.isEmpty {
+                Text(L10n.t("Ports, orphaned processes and stale worktrees left by agent sessions; tick and clean up."))
+                    .font(T.small)
+                    .foregroundStyle(T.muted)
+                    .padding(.horizontal, T.s3)
+                    .padding(.top, 2)
+            }
             if let report = env.report {
                 ReportCard(report: report, dismiss: env.dismissReport)
                     .padding(.bottom, 4)

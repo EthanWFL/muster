@@ -395,30 +395,6 @@ struct EmptyState: View {
 // MARK: - 折叠行
 
 /// 卡片底部的「显示其余 N 条」：先给几条，剩下的折起来。
-struct CollapseRow: View {
-    let hiddenCount: Int
-    @Binding var expanded: Bool
-
-    var body: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.16)) { expanded.toggle() }
-        } label: {
-            HStack(spacing: 4) {
-                Text(expanded ? L10n.t("Show less") : L10n.t("Show %d more", hiddenCount))
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(T.glyph)
-                Spacer(minLength: 0)
-            }
-            .font(T.small)
-            .foregroundStyle(T.muted)
-            .padding(.horizontal, T.s3)
-            .frame(height: T.rowCompact)
-            .contentShape(Rectangle())
-            .hoverHighlight()
-        }
-        .buttonStyle(.plain)
-    }
-}
 
 // MARK: - 列表块
 
