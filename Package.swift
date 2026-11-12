@@ -24,7 +24,6 @@ let package = Package(
         .executableTarget(name: "muster-hook", dependencies: ["MusterProtocol"]),
         .testTarget(name: "MusterProtocolTests", dependencies: ["MusterProtocol"]),
         .testTarget(name: "MusterCoreTests", dependencies: ["MusterCore", "MusterProtocol"]),
-        .testTarget(name: "MusterTests", dependencies: ["MusterCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

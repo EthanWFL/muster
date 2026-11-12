@@ -23,14 +23,6 @@ final class SettingsCoordinator {
             .sink { [weak self] enabled in self?.hotKey?.setEnabled(enabled) }
     }
 
-    func show(model: PanelModel) {
-        NSApp.activate(ignoringOtherApps: true)
-        // macOS 14 uses showSettingsWindow:; the older selector is a fallback for SwiftUI shells.
-        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-    }
-
     func checkForUpdates() {
         Task { @MainActor in
             do {

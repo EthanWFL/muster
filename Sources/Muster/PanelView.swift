@@ -3,38 +3,38 @@ import SwiftUI
 
 struct PanelView: View {
     @ObservedObject var model: PanelModel
+    /// 观察外观：深浅色一变，整块 token 重新求值
+    @ObservedObject private var theme = Theme.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            SegmentedTabs(selection: $model.tab, badges: [.approvals: model.pending.count])
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+            header
+            Hairline()
 
             Group {
-                switch model.tab {
-                case .approvals: ApprovalsView(model: model, returnFocus: { focused = true })
-                case .sessions: SessionsView(model: model)
-                case .environment: EnvironmentView(model: model, env: model.env)
-                case .rules: RulesView(rules: model.rules)
+                if model.showsSettings {
+                    SettingsView(store: SettingsStore.shared, model: model)
+                } else {
+                    tabs
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
-            .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
+            .transition(.opacity)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: model.showsSettings)
 
             if let action = model.pendingHookAction { hookConfirm(action) }
             if let notice = model.notice {
                 Text(notice)
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.bottom, 8)
+                    .font(T.small).foregroundStyle(T.muted)
+                    .padding(.horizontal, T.s4).padding(.bottom, T.s2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
+            Hairline()
             footer
         }
         .frame(width: 420)
+        .background(T.bg)
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
@@ -42,46 +42,109 @@ struct PanelView: View {
         .onKeyPress(phases: .down, action: handleKey)
     }
 
+    /// 顶部：左边品牌，右边 GitHub 与设置
+    private var header: some View {
+        HStack(spacing: T.s2) {
+            BrandMark()
+            Text("Muster")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(T.fg)
+            Spacer(minLength: T.s2)
+            iconButton("arrow.up.right.square", help: L10n.t("Open the GitHub repository"), active: false) {
+                if let url = URL(string: "https://github.com/EthanWFL/muster") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            iconButton(
+                "gearshape", help: L10n.t("Settings"), active: model.showsSettings,
+                shortcut: ",") {
+                model.toggleSettings()
+            }
+        }
+        .padding(.horizontal, T.s3)
+        .frame(height: 40)
+    }
+
+    private func iconButton(
+        _ symbol: String, help: String, active: Bool,
+        shortcut: KeyEquivalent? = nil, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(active ? T.fg : T.ctlFg)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
+                    .fill(active ? T.card2 : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .modifier(OptionalShortcut(key: shortcut))
+    }
+
+    @ViewBuilder private var tabs: some View {
+        SegmentedTabs(
+            selection: $model.tab, tabs: model.orderedTabs,
+            badges: [.approvals: model.pending.count])
+            .padding(.horizontal, T.s3)
+            .padding(.top, T.s3)
+            .padding(.bottom, T.s2)
+
+        Hairline()
+
+        ScrollView(.vertical) {
+                Group {
+                    switch model.tab {
+                    case .approvals: ApprovalsView(model: model, returnFocus: { focused = true })
+                    case .sessions: SessionsView(model: model)
+                    case .environment: EnvironmentView(model: model, env: model.env)
+                    case .instructions: InstructionsView(model: model.instructions)
+                    }
+                }
+                .padding(.horizontal, T.s2)
+                .padding(.bottom, T.s2)
+                .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
+            }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.visible)
+        .padding(.bottom, T.s2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
     private var footer: some View {
         HStack(spacing: 0) {
-            if let installed = model.hookInstalled {
-                Button(installed ? L10n.t("Uninstall hook") : L10n.t("Install hook")) {
-                    model.requestHook(installed ? .uninstall : .install)
-                }
-                .buttonStyle(PillButtonStyle(kind: .quiet))
-            }
             Spacer()
-            Button { SettingsCoordinator.shared.show(model: model) } label: {
-                ShortcutLabel(title: L10n.t("Settings"), glyph: "⌘,")
+            Button { NSApplication.shared.terminate(nil) } label: {
+                ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q")
             }
             .buttonStyle(PillButtonStyle(kind: .quiet))
-            .keyboardShortcut(",", modifiers: .command)
-            Button { NSApplication.shared.terminate(nil) } label: { ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q") }
-                .buttonStyle(PillButtonStyle(kind: .quiet))
-                .keyboardShortcut("q")
+            .keyboardShortcut("q")
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, T.s2)
         .frame(height: 40)
     }
 
     private func hookConfirm(_ action: PanelModel.HookAction) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: T.s2) {
             Text(L10n.t(
                 action == .install
                     ? "Add the Muster PreToolUse hook to %@? A backup is made first."
                     : "Remove only the Muster hook from %@? A backup is made first.",
                 model.settingsPath
             ))
-            .font(.subheadline)
-            HStack {
+            .font(T.body)
+            .foregroundStyle(T.fg)
+            HStack(spacing: T.s2) {
                 Button(L10n.t("Confirm")) { model.confirmHookAction() }
                     .buttonStyle(PillButtonStyle(kind: .primary))
                 Button(L10n.t("Cancel")) { model.cancelHookAction() }
                     .buttonStyle(PillButtonStyle(kind: .secondary))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.horizontal, T.s4)
+        .padding(.bottom, T.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -99,6 +162,14 @@ struct PanelView: View {
                 return .ignored
             }
             return .handled
+        }
+        // 设置页里 ⎋ 退回主视图
+        if model.showsSettings {
+            if press.key == .escape {
+                model.showsSettings = false
+                return .handled
+            }
+            return .ignored
         }
         // 编辑拒绝原因时按键归输入框；非审批页不抢键
         guard model.denyDraft == nil, model.tab == .approvals else { return .ignored }
@@ -129,6 +200,19 @@ struct PanelView: View {
             case "k": model.moveSelection(by: -1); return .handled
             default: return .ignored
             }
+        }
+    }
+}
+
+/// 只在给了键值时挂 ⌘ 快捷键
+private struct OptionalShortcut: ViewModifier {
+    let key: KeyEquivalent?
+
+    func body(content: Content) -> some View {
+        if let key {
+            content.keyboardShortcut(key, modifiers: .command)
+        } else {
+            content
         }
     }
 }

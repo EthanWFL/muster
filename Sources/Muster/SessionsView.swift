@@ -3,33 +3,35 @@ import SwiftUI
 
 struct SessionsView: View {
     @ObservedObject var model: PanelModel
+    private static let pageSize = 8
+    @State private var expanded = false
 
-    private var visible: [Session] {
+    private var active: [Session] {
         model.sessions
             .filter { $0.state != .ended }
             .sorted { $0.lastActivityAt > $1.lastActivityAt }
-            .prefix(8)
-            .map { $0 }
     }
 
+    private var shown: [Session] { expanded ? active : Array(active.prefix(Self.pageSize)) }
+    private var hiddenCount: Int { active.count - shown.count }
+
     var body: some View {
-        if visible.isEmpty {
-            VStack(spacing: 4) {
-                Text(L10n.t("No active sessions")).fontWeight(.semibold)
-                Text(L10n.t("Sessions from Claude Code show up here")).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 48)
+        if active.isEmpty {
+            EmptyState(
+                title: L10n.t("No active sessions"),
+                message: L10n.t("Sessions from Claude Code show up here"))
         } else {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.t("Active"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                ForEach(visible) { session in
-                    SessionRow(model: model, session: session)
+            VStack(alignment: .leading, spacing: T.s2) {
+                SectionTitle(text: L10n.t("Active"), count: active.count)
+                Card {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, session in
+                        SessionRow(model: model, session: session)
+                        if index < shown.count - 1 { Hairline().padding(.leading, T.s3 + 15) }
+                    }
+                    if active.count > Self.pageSize {
+                        Hairline().padding(.leading, T.s3 + 15)
+                        CollapseRow(hiddenCount: hiddenCount, expanded: $expanded)
+                    }
                 }
             }
         }
@@ -43,32 +45,37 @@ private struct SessionRow: View {
     private var pendingCount: Int { model.pending.filter { $0.sessionID == session.id }.count }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle().fill(color).frame(width: 8, height: 8)
+        HStack(spacing: T.s2) {
+            StatusDot(tone: tone)
             VStack(alignment: .leading, spacing: 0) {
                 Text(session.projectName)
+                    .font(T.body)
+                    .foregroundStyle(T.fg)
+                    .lineLimit(1)
                 Text("\((session.cwd as NSString).abbreviatingWithTildeInPath) · \(session.agent.rawValue)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(T.monoMicro)
+                    .foregroundStyle(T.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: T.s2)
             trailing
-                .font(.subheadline)
-                .foregroundStyle(session.state == .waiting ? Color.orange : Color.secondary)
+                .font(T.small)
+                .foregroundStyle(session.state == .waiting ? T.amber : T.muted)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: 160, alignment: .trailing)
+                .frame(maxWidth: 150, alignment: .trailing)
             Button { model.jumpToTerminal(session) } label: {
-                Image(systemName: "terminal")
+                Image(systemName: "terminal").font(.system(size: 11))
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .foregroundStyle(T.faint)
             .help(L10n.t("Focus this session's terminal window. If it cannot be found, the folder path is copied."))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, T.s3)
+        .frame(height: 40)
+        .hoverHighlight()
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder private var trailing: some View {
@@ -82,11 +89,11 @@ private struct SessionRow: View {
         }
     }
 
-    private var color: Color {
+    private var tone: StatusTone {
         switch session.state {
-        case .running: return .green
-        case .waiting: return .orange
-        case .idle, .ended: return Color.secondary.opacity(0.6)
+        case .running: return .busy
+        case .waiting: return .waiting
+        case .idle, .ended: return .idle
         }
     }
 }

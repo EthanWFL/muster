@@ -39,18 +39,62 @@ final class PanelModel: ObservableObject {
     enum HookAction { case install, uninstall }
 
     enum Tab: String, CaseIterable {
-        case approvals = "Approvals", sessions = "Sessions", environment = "Environment", rules = "Rules"
+        case approvals = "Approvals", sessions = "Sessions", environment = "Environment",
+             instructions = "Instructions"
 
         var title: String {
             switch self {
             case .approvals: return L10n.t("Approvals")
             case .sessions: return L10n.t("Sessions")
             case .environment: return L10n.t("Environment")
-            case .rules: return L10n.t("Rules")
+            case .instructions: return L10n.t("Instructions")
             }
         }
     }
-    @Published var tab: Tab = .approvals
+    /// 上次停在哪个 tab，下次点开图标回到这里
+    @Published var tab: Tab = PanelModel.storedTab() {
+        didSet { UserDefaults.standard.set(tab.rawValue, forKey: Self.tabKey) }
+    }
+
+    static let tabKey = "MusterLastTab"
+
+    private static func storedTab() -> Tab {
+        guard let raw = UserDefaults.standard.string(forKey: tabKey) else { return .approvals }
+        return Tab(rawValue: raw) ?? .approvals
+    }
+    /// 面板里正在显示设置页（不再是独立窗口）
+    @Published var showsSettings = false
+
+    /// 顶部 tab 的展示顺序（设置页可调），空表示按默认顺序
+    @Published var tabOrder: [Tab] = PanelModel.storedTabOrder() {
+        didSet { UserDefaults.standard.set(tabOrder.map(\.rawValue), forKey: Self.tabOrderKey) }
+    }
+
+    static let tabOrderKey = "MusterTabOrder"
+
+    /// 实际渲染用的顺序：存过的顺序 + 补齐新增的 tab
+    var orderedTabs: [Tab] {
+        let known = Set(Tab.allCases)
+        var seen = Set<Tab>()
+        var out: [Tab] = []
+        for tab in tabOrder where known.contains(tab) && seen.insert(tab).inserted { out.append(tab) }
+        for tab in Tab.allCases where seen.insert(tab).inserted { out.append(tab) }
+        return out
+    }
+
+    /// 拖动排序：把第 from 项挪到第 to 项的位置
+    func moveTab(from: Int, to: Int) {
+        var order = orderedTabs
+        guard order.indices.contains(from), order.indices.contains(to), from != to else { return }
+        let item = order.remove(at: from)
+        order.insert(item, at: to)
+        tabOrder = order
+    }
+
+    private static func storedTabOrder() -> [Tab] {
+        let raw = UserDefaults.standard.stringArray(forKey: tabOrderKey) ?? []
+        return raw.compactMap(Tab.init(rawValue:))
+    }
 
     /// 倒计时线的总长；与 `ApprovalStore.timeout` 一致
     var approvalTimeout: TimeInterval { daemon.approvals.timeout }
@@ -58,13 +102,19 @@ final class PanelModel: ObservableObject {
     /// 高危命令默认不提供「允许同类」（见 IMPLEMENTATION.md M2 2.6），由 store 决定
     func canAllowSimilar(_ id: String) -> Bool { daemon.approvals.canOfferAllowSimilar(id: id) }
 
+    /// 设置并入面板：再点一次退回主视图
+    func toggleSettings() {
+        showsSettings.toggle()
+        if showsSettings { denyDraft = nil }
+    }
+
     func lastToolSummary(for sessionID: String) -> String? {
         daemon.sessions.toolSummaries(for: sessionID).last
     }
 
     let daemon = AgentDaemon()
     let env = EnvironmentModel()
-    let rules = RulesModel()
+    let instructions = InstructionsModel()
     private var server: SocketServer?
     private var adapter: ClaudeAdapter?
     private var installer: ClaudeHookInstaller? { adapter?.installer }

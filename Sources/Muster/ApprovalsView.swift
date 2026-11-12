@@ -7,24 +7,43 @@ struct ApprovalsView: View {
     let returnFocus: () -> Void
 
     var body: some View {
-        if model.pending.isEmpty {
-            VStack(spacing: 4) {
-                Text(L10n.t("Nothing waiting")).fontWeight(.semibold)
-                Text(L10n.t("Requests from your agents appear here")).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 48)
-        } else {
-            // 只在面板可见时每秒刷新一次，用于等待时长和倒计时线
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                VStack(spacing: 2) {
-                    ForEach(model.pending) { call in
-                        ApprovalRow(
-                            model: model, call: call, now: context.date,
-                            selected: call.id == model.selection, returnFocus: returnFocus)
+        VStack(alignment: .leading, spacing: T.s2) {
+            hookRow
+            if model.pending.isEmpty {
+                EmptyState(
+                    title: L10n.t("Nothing waiting"),
+                    message: L10n.t("Requests from your agents appear here"))
+            } else {
+                // 只在面板可见时每秒刷新一次，用于等待时长和倒计时线
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Card {
+                        ForEach(Array(model.pending.enumerated()), id: \.element.id) { index, call in
+                            ApprovalRow(
+                                model: model, call: call, now: context.date,
+                                selected: call.id == model.selection, returnFocus: returnFocus)
+                            if index < model.pending.count - 1 { Hairline() }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// 没装 hook 时才在审批页提示（没有 hook 就没有审批流）；装好之后不再占行
+    @ViewBuilder private var hookRow: some View {
+        if model.hookInstalled == false {
+            HStack(spacing: T.s2) {
+                Text(L10n.t("PreToolUse hook"))
+                    .font(T.small)
+                    .foregroundStyle(T.muted)
+                Spacer(minLength: T.s2)
+                Button(L10n.t("Install hook")) {
+                    model.requestHook(.install)
+                }
+                .buttonStyle(PillButtonStyle(kind: .secondary))
+            }
+            .padding(.horizontal, T.s3)
+            .frame(height: T.rowCompact)
         }
     }
 }
@@ -50,54 +69,54 @@ private struct ApprovalRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Circle().fill(riskColor).frame(width: 8, height: 8)
-                Text(parts.tool).fontWeight(.semibold)
+            HStack(spacing: T.s2) {
+                StatusDot(tone: riskTone)
+                Text(parts.tool).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(T.fg)
                 Text(parts.summary)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(T.mono)
+                    .foregroundStyle(T.fg2)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if call.repeatCount > 1 {
-                    Text("×\(call.repeatCount)").font(.subheadline).foregroundStyle(.secondary)
+                    Text("×\(call.repeatCount)").font(T.micro).foregroundStyle(T.muted)
                 }
-                Text("\(elapsed)s").font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                Text("\(elapsed)s").font(T.monoMicro).monospacedDigit().foregroundStyle(T.faint)
             }
             HStack {
                 Text("\((call.cwd as NSString).abbreviatingWithTildeInPath) · \(call.agent.rawValue)")
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: 8)
-                Text(riskLabel).foregroundStyle(riskColor)
+                Spacer(minLength: T.s2)
+                Text(riskLabel).foregroundStyle(riskTone.color)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .padding(.leading, 16)
+            .font(T.small)
+            .foregroundStyle(T.muted)
+            .padding(.leading, 15)
             .padding(.top, 2)
 
             if selected {
                 ApprovalDetail(model: model, call: call, remaining: remaining, returnFocus: returnFocus)
-                    .padding(.top, 12)
+                    .padding(.top, T.s3)
             }
 
             // 90s 超时倒计时：这个面板的标志性细节，最后 15s 变红
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.primary.opacity(0.06))
+                    Capsule().fill(T.segTrack)
                     Capsule()
-                        .fill(urgent ? Color.red : Color.primary.opacity(0.3))
+                        .fill(urgent ? T.red : T.ctlFg)
                         .frame(width: g.size.width * CGFloat(remaining / max(model.approvalTimeout, 1)))
                 }
             }
             .frame(height: 2)
-            .padding(.top, 8)
+            .padding(.top, T.s2)
             .animation(.linear(duration: 1), value: remaining)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(selected ? Color.primary.opacity(0.06) : .clear))
+        .padding(.horizontal, T.s3)
+        .padding(.vertical, T.s2)
+        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous)
+            .fill(selected ? T.card2 : .clear))
         .contentShape(Rectangle())
         .onTapGesture {
             guard model.selection != call.id else { return }
@@ -107,11 +126,11 @@ private struct ApprovalRow: View {
         }
     }
 
-    private var riskColor: Color {
+    private var riskTone: StatusTone {
         switch call.risk {
-        case .high: return .red
-        case .medium: return .orange
-        case .low: return Color.secondary
+        case .high: return .failed
+        case .medium: return .waiting
+        case .low: return .neutral
         }
     }
 
@@ -132,20 +151,20 @@ private struct ApprovalDetail: View {
     @FocusState private var reasonFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: T.s3) {
             CodeBlock(lines: ToolDetail.lines(for: call))
 
-            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
+            Grid(alignment: .leading, horizontalSpacing: T.s2, verticalSpacing: 2) {
                 GridRow {
-                    Text(L10n.t("Folder")).foregroundStyle(.secondary)
+                    Text(L10n.t("Folder")).foregroundStyle(T.muted)
                     Text((call.cwd as NSString).abbreviatingWithTildeInPath).lineLimit(1).truncationMode(.middle)
                 }
                 GridRow {
-                    Text(L10n.t("Session")).foregroundStyle(.secondary)
+                    Text(L10n.t("Session")).foregroundStyle(T.muted)
                     Text("\(call.agent.rawValue) · \(call.sessionID.prefix(8))")
                 }
                 GridRow {
-                    Text(L10n.t("Expires")).foregroundStyle(.secondary)
+                    Text(L10n.t("Expires")).foregroundStyle(T.muted)
                     Text(L10n.t(
                         "in %ds, then %@ asks you itself",
                         Int(remaining.rounded(.up)),
@@ -154,7 +173,7 @@ private struct ApprovalDetail: View {
                     .monospacedDigit()
                 }
                 GridRow {
-                    Text(L10n.t("Terminal")).foregroundStyle(.secondary)
+                    Text(L10n.t("Terminal")).foregroundStyle(T.muted)
                     Button { model.jumpToTerminal() } label: {
                         ShortcutLabel(title: L10n.t("Show"), glyph: "⌘⏎")
                     }
@@ -162,7 +181,8 @@ private struct ApprovalDetail: View {
                     .help(L10n.t("Focus the terminal window running this session. If it cannot be found, the folder path is copied."))
                 }
             }
-            .font(.subheadline)
+            .font(T.small)
+            .foregroundStyle(T.fg2)
 
             if let prompt = model.pendingPermanentAllow, prompt.callID == call.id {
                 permanentPrompt(prompt)
@@ -175,7 +195,7 @@ private struct ApprovalDetail: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: T.s2) {
             Button { model.allowSelected() } label: { ShortcutLabel(title: L10n.t("Allow"), glyph: "⏎") }
                 .buttonStyle(PillButtonStyle(kind: .primary))
             Button { model.beginDeny() } label: { ShortcutLabel(title: L10n.t("Deny"), glyph: "⌫") }
@@ -192,17 +212,18 @@ private struct ApprovalDetail: View {
     }
 
     private func permanentPrompt(_ prompt: PanelModel.PermanentAllowPrompt) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: T.s2) {
             Text(L10n.t("Always allow this exact command?"))
-                .font(.subheadline.weight(.medium))
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(T.fg)
             CodeBlock(lines: [DetailLine(kind: .plain, text: "permissions.allow += \(prompt.rule.text)")])
             Text(L10n.t(
                 "Adds the line above to %@. A backup is written first, and this survives the session. Only an identical command matches.",
                 model.settingsPath
             ))
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
+            .font(T.small)
+            .foregroundStyle(T.muted)
+            HStack(spacing: T.s2) {
                 Button { model.confirmPermanentAllow(); returnFocus() } label: {
                     ShortcutLabel(title: L10n.t("Allow & save"), glyph: "⏎")
                 }
@@ -216,15 +237,17 @@ private struct ApprovalDetail: View {
     }
 
     private var reasonEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: T.s2) {
+            HStack(spacing: T.s2) {
                 TextField(L10n.t("Reason sent to the agent"), text: Binding(
                     get: { model.denyDraft ?? "" }, set: { model.denyDraft = $0 }))
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5))
+                    .font(T.body)
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
+                    .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
+                        .strokeBorder(T.accent, lineWidth: 1))
                     .focused($reasonFocused)
                     .onSubmit { model.confirmDeny(); returnFocus() }
                     .onExitCommand { model.cancelDeny(); returnFocus() }
@@ -232,7 +255,7 @@ private struct ApprovalDetail: View {
                     .buttonStyle(PillButtonStyle(kind: .primary))
             }
             Text(L10n.t("The agent receives this reason · Esc to cancel"))
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(T.small).foregroundStyle(T.muted)
         }
         .onAppear { reasonFocused = true }
     }

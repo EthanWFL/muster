@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private var pendingSubscription: AnyCancellable?
+    private var resignObserver: NSObjectProtocol?
 
     init(model: PanelModel) {
         self.model = model
@@ -32,7 +33,28 @@ final class StatusItemController: NSObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.updateBadge(count: $0) }
 
-        SettingsCoordinator.shared.onOpenPanel = { [weak self] in self?.showPanel() }
+        SettingsCoordinator.shared.onOpenPanel = { [weak self] in
+            // 热键总是回主视图，不要停在设置页
+            self?.model.showsSettings = false
+            self?.showPanel()
+        }
+
+        // `.transient` 只在 App 还活着的时候响应外部点击；切到别的 App（⌘Tab、点别人窗口）时
+        // popover 会留着。失去焦点就关，但草稿留在 model 里，下次打开还在。
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.closeIfShown() }
+        }
+    }
+
+    deinit {
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+    }
+
+    private func closeIfShown() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
     }
 
     private func updateBadge(count: Int) {
@@ -100,7 +122,10 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openPanel() { showPanel() }
-    @objc private func openSettings() { SettingsCoordinator.shared.show(model: model) }
+    @objc private func openSettings() {
+        showPanel()
+        model.showsSettings = true
+    }
     @objc private func installHook() {
         showPanel()
         model.requestHook(.install)

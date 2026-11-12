@@ -25,15 +25,9 @@ struct EnvironmentView: View {
                     .padding(.bottom, 4)
             }
             if env.items.isEmpty {
-                VStack(spacing: 4) {
-                    Text(env.plan == nil ? L10n.t("Scanning…") : L10n.t("Nothing to clean up")).fontWeight(.semibold)
-                    Text(L10n.t("Listening ports, orphaned processes and stale worktrees from agent sessions show up here"))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
-                .padding(.horizontal, 16)
+                EmptyState(
+                    title: env.plan == nil ? L10n.t("Scanning…") : L10n.t("Nothing to clean up"),
+                    message: L10n.t("Listening ports, orphaned processes and stale worktrees from agent sessions show up here"))
             } else {
                 section(L10n.t("Listening ports"), listeners)
                 section(L10n.t("Orphaned processes"), orphans)
@@ -47,15 +41,14 @@ struct EnvironmentView: View {
 
     @ViewBuilder private func section(_ title: String, _ items: [CleanupItem]) -> some View {
         if !items.isEmpty {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-            ForEach(items) { item in
-                CleanupRow(model: model, env: env, item: item)
+            SectionTitle(text: title, count: items.count)
+            Card {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    CleanupRow(model: model, env: env, item: item)
+                    if index < items.count - 1 { Hairline().padding(.leading, T.s3 + 30) }
+                }
             }
+            .padding(.bottom, T.s2)
         }
     }
 }
@@ -69,19 +62,20 @@ private struct CleanupRow: View {
     private var isConfirmed: Bool { env.confirmed.contains(item.id) }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: T.s2) {
             Toggle(isOn: Binding(get: { isSelected }, set: { _ in env.toggle(item.id) })) { EmptyView() }
                 .toggleStyle(.checkbox)
                 .labelsHidden()
             VStack(alignment: .leading, spacing: 0) {
                 text.main
-                text.sub.font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                text.sub.font(T.monoMicro).foregroundStyle(T.muted).lineLimit(1).truncationMode(.middle)
             }
-            Spacer(minLength: 8)
-            trailing.font(.subheadline)
+            Spacer(minLength: T.s2)
+            trailing.font(T.small)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, T.s3)
+        .frame(minHeight: 40)
+        .hoverHighlight()
         .contentShape(Rectangle())
         .onTapGesture { env.toggle(item.id) }
     }
@@ -96,15 +90,16 @@ private struct CleanupRow: View {
             let name = t.name ?? L10n.t("process")
             if t.kind == .listener {
                 let ports = t.ports.map { ":\($0)" }.joined(separator: " ")
-                return (Text(ports).font(.system(size: 12, design: .monospaced)) + Text("  \(name)"),
+                return (Text(ports).font(T.mono) + Text("  \(name)").font(T.body),
                         Text("\(projectName(t.sessionID)) · pid \(t.identity.pid)"))
             }
-            return (Text(name) + Text("  pid \(t.identity.pid)").font(.system(size: 12, design: .monospaced)),
+            return (Text(name).font(T.body) + Text("  pid \(t.identity.pid)").font(T.mono),
                     Text(L10n.t("Orphaned from %@", projectName(t.sessionID))))
         case .pruneWorktrees(let repo):
-            return (Text(L10n.t("Prune stale worktrees")), Text((repo as NSString).abbreviatingWithTildeInPath))
+            return (Text(L10n.t("Prune stale worktrees")).font(T.body),
+                    Text((repo as NSString).abbreviatingWithTildeInPath))
         case .removeWorktreeDirectory(_, let path):
-            return (Text((path as NSString).abbreviatingWithTildeInPath).font(.system(size: 12, design: .monospaced)),
+            return (Text((path as NSString).abbreviatingWithTildeInPath).font(T.mono),
                     Text(L10n.t("Merged worktree directory")))
         }
     }
@@ -115,12 +110,12 @@ private struct CleanupRow: View {
                 .buttonStyle(PillButtonStyle(kind: isConfirmed ? .secondary : .primary))
         } else if let c = item.confidence {
             Text(item.isUncertain ? L10n.t("Uncertain") : "\(Int((c * 100).rounded()))%")
-                .foregroundStyle(item.isUncertain ? Color.orange : Color.secondary)
+                .foregroundStyle(item.isUncertain ? T.amber : T.muted)
                 .monospacedDigit()
         } else if case .removeWorktreeDirectory = item.action {
-            Text(L10n.t("Needs confirmation")).foregroundStyle(.secondary)
+            Text(L10n.t("Needs confirmation")).foregroundStyle(T.muted)
         } else {
-            Text(L10n.t("Prune")).foregroundStyle(.secondary)
+            Text(L10n.t("Prune")).foregroundStyle(T.muted)
         }
     }
 }
@@ -130,25 +125,27 @@ private struct PlanBox: View {
     @ObservedObject var env: EnvironmentModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: T.s3) {
             Text(env.commandTexts.isEmpty ? L10n.t("Nothing selected") : env.commandTexts.joined(separator: "\n"))
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .font(T.mono)
+                .foregroundStyle(T.fg2)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Text(hint).font(.subheadline).foregroundStyle(.secondary)
+                Text(hint).font(T.small).foregroundStyle(T.muted)
                 Spacer()
                 Button(env.isBusy ? L10n.t("Working…") : L10n.t("Clean up %d", env.selectedItems.count)) { env.execute() }
                     .buttonStyle(PillButtonStyle(kind: .primary))
                     .disabled(!env.canExecute)
             }
         }
-        .padding(12)
+        .padding(T.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
-        .padding(.horizontal, 4)
-        .padding(.top, 12)
+        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
+        .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
+            .strokeBorder(T.line, lineWidth: 0.5))
+        .padding(.horizontal, T.s1)
+        .padding(.top, T.s3)
     }
 
     private var hint: String {
@@ -165,28 +162,31 @@ private struct ReportCard: View {
     let dismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: T.s2) {
             HStack {
-                Text(L10n.t("Cleanup result")).fontWeight(.semibold)
+                Text(L10n.t("Cleanup result")).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(T.fg)
                 Spacer()
                 Button(L10n.t("Dismiss"), action: dismiss).buttonStyle(PillButtonStyle(kind: .quiet))
             }
             ForEach(Array(report.entries.enumerated()), id: \.offset) { _, entry in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: T.s2) {
                     Text(entry.commandText)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(T.mono)
+                        .foregroundStyle(T.fg2)
                         .lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: T.s2)
                     Text(outcomeText(entry.outcome))
-                        .font(.subheadline)
+                        .font(T.small)
                         .foregroundStyle(outcomeColor(entry.outcome))
                 }
             }
-            if let summary = summary { Text(summary).font(.subheadline).foregroundStyle(.secondary) }
+            if let summary = summary { Text(summary).font(T.small).foregroundStyle(T.muted) }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
-        .padding(.horizontal, 4)
+        .padding(T.s3)
+        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
+        .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
+            .strokeBorder(T.line, lineWidth: 0.5))
+        .padding(.horizontal, T.s1)
     }
 
     private var summary: String? {
@@ -213,9 +213,9 @@ private struct ReportCard: View {
 
     private func outcomeColor(_ o: CleanupOutcome) -> Color {
         switch o {
-        case .done, .termSent: return .secondary
-        case .refused: return .orange
-        case .failed: return .red
+        case .done, .termSent: return T.muted
+        case .refused: return T.amber
+        case .failed: return T.red
         }
     }
 
