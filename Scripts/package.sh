@@ -5,7 +5,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.0"
+VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+# 默认跟最新 git tag 走，避免 plist 和 tag 两处手填错位；显式传参依旧可覆盖。
+[[ -n "$VERSION" ]] || VERSION="0.1.0"
 MAKE_DMG=0
 for arg in "$@"; do
     case "$arg" in

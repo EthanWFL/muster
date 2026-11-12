@@ -28,11 +28,15 @@ final class SettingsCoordinator {
             do {
                 if let release = try await UpdateChecker.latest() {
                     if AppVersion.isNewer(release.version, than: store.appVersion) {
-                        alert(
-                            title: L10n.t("Check for Updates…"),
-                            message: L10n.t("Version %@ is available.", release.version),
-                            open: release.url
-                        )
+                        if let asset = release.assetURL {
+                            confirmInstall(release, asset: asset)
+                        } else {
+                            alert(
+                                title: L10n.t("Check for Updates…"),
+                                message: L10n.t("Version %@ is available.", release.version),
+                                open: release.url
+                            )
+                        }
                     } else {
                         alert(title: L10n.t("Check for Updates…"), message: L10n.t("Muster is up to date."))
                     }
@@ -55,6 +59,49 @@ final class SettingsCoordinator {
 
     private var releasesURL: URL {
         URL(string: "https://github.com/EthanWFL/muster/releases")!
+    }
+
+    /// release 带 DMG 时可以直接装；没带就退回去发布页手动下。
+    private func confirmInstall(_ release: UpdateRelease, asset: URL) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L10n.t("Check for Updates…")
+        alert.informativeText = L10n.t("Version %@ is available.", release.version)
+        alert.addButton(withTitle: L10n.t("Download and Install"))
+        alert.addButton(withTitle: L10n.t("Open Releases"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: install(asset)
+        case .alertSecondButtonReturn: NSWorkspace.shared.open(release.url)
+        default: break
+        }
+    }
+
+    /// 下载 → 挂载 → 换包 → 重启。下载和换包都不在主线程，界面只是短暂没反馈。
+    // shortcut: 没有进度条和断点续传，DMG 大了会显得卡住；真嫌慢再加进度。
+    private func install(_ asset: URL) {
+        let appURL = Bundle.main.bundleURL
+        Task {
+            do {
+                let (downloaded, response) = try await URLSession.shared.download(from: asset)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw UpdateCheckError.download((response as? HTTPURLResponse)?.statusCode ?? -1)
+                }
+                let dmg = FileManager.default.temporaryDirectory.appendingPathComponent("Muster-update.dmg")
+                try? FileManager.default.removeItem(at: dmg)
+                try FileManager.default.moveItem(at: downloaded, to: dmg)
+                try await Task.detached { try UpdateInstaller.install(dmgURL: dmg, replacing: appURL) }.value
+                try? FileManager.default.removeItem(at: dmg)
+                UpdateInstaller.relaunch(appURL)
+                NSApp.terminate(nil)
+            } catch {
+                alert(
+                    title: L10n.t("Check for Updates…"),
+                    message: L10n.t("Could not install the update: %@", error.localizedDescription),
+                    open: releasesURL
+                )
+            }
+        }
     }
 
     private func alert(title: String, message: String, open url: URL? = nil) {

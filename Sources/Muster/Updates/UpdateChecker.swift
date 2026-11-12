@@ -3,14 +3,18 @@ import Foundation
 struct UpdateRelease {
     let version: String
     let url: URL
+    /// release 里附的 DMG；没有就只能打开发布页，装不了
+    let assetURL: URL?
 }
 
 enum UpdateCheckError: LocalizedError {
     case http(Int)
+    case download(Int)
 
     var errorDescription: String? {
         switch self {
         case .http(let code): return "GitHub returned HTTP \(code)"
+        case .download(let code): return "Download returned HTTP \(code)"
         }
     }
 }
@@ -29,11 +33,21 @@ enum UpdateChecker {
         if http.statusCode == 404 { return nil }
         guard (200..<300).contains(http.statusCode) else { throw UpdateCheckError.http(http.statusCode) }
         struct Release: Decodable {
+            struct Asset: Decodable {
+                let name: String
+                let browser_download_url: String
+            }
             let tag_name: String
             let html_url: String
+            let assets: [Asset]?
         }
         let release = try JSONDecoder().decode(Release.self, from: data)
         guard let url = URL(string: release.html_url) else { return nil }
-        return UpdateRelease(version: release.tag_name, url: url)
+        let asset = release.assets?.first { $0.name.hasSuffix(".dmg") }
+        return UpdateRelease(
+            version: release.tag_name,
+            url: url,
+            assetURL: asset.flatMap { URL(string: $0.browser_download_url) }
+        )
     }
 }

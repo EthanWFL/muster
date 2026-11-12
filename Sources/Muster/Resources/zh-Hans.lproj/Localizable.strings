@@ -101,6 +101,8 @@
 "Muster is up to date." = "Muster 已是最新版本。";
 "Version %@ is available." = "发现新版本 %@。";
 "Open Releases" = "打开发布页";
+"Download and Install" = "下载并安装";
+"Could not install the update: %@" = "更新安装失败：%@";
 "OK" = "好";
 "Launch at login requires the packaged app." = "登录启动需要打包后的 App。";
 "Login item error: %@" = "登录项错误：%@";

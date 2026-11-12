@@ -101,6 +101,8 @@
 "Muster is up to date." = "Muster is up to date.";
 "Version %@ is available." = "Version %@ is available.";
 "Open Releases" = "Open Releases";
+"Download and Install" = "Download and Install";
+"Could not install the update: %@" = "Could not install the update: %@";
 "OK" = "OK";
 "Launch at login requires the packaged app." = "Launch at login requires the packaged app.";
 "Login item error: %@" = "Login item error: %@";
