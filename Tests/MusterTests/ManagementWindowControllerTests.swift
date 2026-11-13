@@ -11,8 +11,9 @@ import MusterCore
         controller.open()
         let window = try #require(controller.window)
         window.setFrameAutosaveName("")
-        let userFrame = NSRect(x: 160, y: 180, width: 1180, height: 760)
+        let userFrame = try fixture.resizedFrame(for: window)
         window.setFrame(userFrame, display: false)
+        #expect(window.frame == userFrame)
 
         for _ in 0..<3 {
             window.performClose(nil)
@@ -52,7 +53,7 @@ import MusterCore
         defer { fixture.cleanup() }
         fixture.controller.open()
         let window = try #require(fixture.controller.window)
-        window.setFrame(NSRect(x: 160, y: 180, width: 1180, height: 760), display: false)
+        window.setFrame(try fixture.resizedFrame(for: window), display: false)
         let savedFrame = window.frame
         window.saveFrame(usingName: "MusterManagementWindow")
         window.setFrameAutosaveName("")
@@ -99,5 +100,15 @@ import MusterCore
         UserDefaults.standard.set(savedTab, forKey: PanelModel.tabKey)
         NSApplication.shared.setActivationPolicy(activationPolicy)
         try? FileManager.default.removeItem(at: root)
+    }
+
+    func resizedFrame(for window: NSWindow) throws -> NSRect {
+        let screen = try #require(window.screen ?? NSScreen.main)
+        let available = screen.visibleFrame.insetBy(dx: 16, dy: 16)
+        let size = NSSize(width: min(1180, available.width), height: min(760, available.height))
+        try #require(size.width >= window.minSize.width && size.height >= window.minSize.height)
+        // CI has a smaller screen; an off-screen fixture would exercise macOS clipping.
+        return NSRect(x: available.midX - size.width / 2, y: available.midY - size.height / 2,
+                      width: size.width, height: size.height)
     }
 }
