@@ -49,13 +49,8 @@ public struct ClaudeTranscriptScanner: Sendable {
         guard fm.fileExists(atPath: projectsRoot.path) else { return [] }
         let cutoff = clock.now().addingTimeInterval(-retention)
         var result: [Session] = []
-        let dirs: [URL]
-        do {
-            dirs = try fm.contentsOfDirectory(
-                at: projectsRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-        } catch {
-            throw AdapterError.io("cannot list \(projectsRoot.lastPathComponent): \(error.localizedDescription)")
-        }
+        let dirs = try fm.contentsOfDirectory(
+            at: projectsRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
         for dir in dirs {
             guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             let files = (try? fm.contentsOfDirectory(

@@ -15,7 +15,6 @@ struct SettingsView: View {
                     appearance
                     tabOrder
                     shortcuts
-                    approvals
                     aboutAndUpdates
                 }
                 .padding(.horizontal, T.s3)
@@ -106,23 +105,7 @@ struct SettingsView: View {
         }
     }
 
-    private var approvals: some View {
-        VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Approvals"))
-            Card {
-                SettingsRow(label: L10n.t("Approval timeout")) {
-                    Text(L10n.t("%ds", Int(model.approvalTimeout.rounded())))
-                        .font(T.small).monospacedDigit().foregroundStyle(T.fg2)
-                }
-                Hairline()
-                SettingsRow(label: L10n.t("Show a notification when a new approval arrives")) {
-                    MiniSwitch(isOn: $store.notificationsEnabled)
-                }
-            }
-        }
-    }
-
-    /// 版本、Hook、设置文件、源码合并成一组，压在最后
+    /// 版本、更新与源码入口。
     private var aboutAndUpdates: some View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("About & updates"))
@@ -134,24 +117,6 @@ struct SettingsView: View {
                 SettingsRow(label: L10n.t("Check for Updates…")) {
                     Button(L10n.t("Check now")) { SettingsCoordinator.shared.checkForUpdates() }
                         .buttonStyle(PillButtonStyle(kind: .secondary))
-                }
-                Hairline()
-                SettingsRow(label: L10n.t("Hook")) {
-                    if let installed = model.hookInstalled {
-                        Button(installed ? L10n.t("Uninstall hook") : L10n.t("Install hook")) {
-                            model.requestHook(installed ? .uninstall : .install)
-                        }
-                        .buttonStyle(PillButtonStyle(kind: .secondary))
-                    } else {
-                        Text(L10n.t("Unknown")).font(T.small).foregroundStyle(T.faint)
-                    }
-                }
-                Hairline()
-                SettingsRow(label: L10n.t("Settings file")) {
-                    Button(L10n.t("Show in Finder")) {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.settingsPath)])
-                    }
-                    .buttonStyle(PillButtonStyle(kind: .secondary))
                 }
                 Hairline()
                 SettingsRow(label: L10n.t("Source code")) {
@@ -178,6 +143,7 @@ struct SettingsView: View {
         Link(text, destination: URL(string: url)!)
             .font(.system(size: 11.5, weight: .medium))
             .foregroundStyle(T.accent)
+            .pointerCursor()
     }
 }
 
@@ -214,6 +180,7 @@ struct TabOrderChips: View {
         .overlay(Capsule().strokeBorder(T.line, lineWidth: 0.5))
         .opacity(dragging == tab ? 0.7 : 1)
         .contentShape(Capsule())
+        .pointerCursor(.openHand)
         .help(L10n.t("Drag to reorder"))
         .accessibilityLabel(tab.title)
         .accessibilityHint(L10n.t("Drag to reorder"))

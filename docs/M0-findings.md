@@ -1,4 +1,6 @@
-# M0 findings: PreToolUse hook behaviour
+# M0 findings: PreToolUse hook behaviour (archived)
+
+> Historical measurements only. Muster no longer ships the approval or Hook implementation. See [legacy cleanup](remove-legacy-hook.md) when upgrading an old installation.
 
 Verified with Claude Code 2.1.292 (`claude -p ... --output-format json`), default permission mode, macOS.
 Each experiment ran in its own `/private/tmp/m0-<name>/` directory with a project-level `.claude/settings.json`

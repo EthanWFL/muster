@@ -85,6 +85,7 @@ private struct CleanupRow: View {
         .hoverHighlight()
         .contentShape(Rectangle())
         .onTapGesture { env.toggle(item.id) }
+        .pointerCursor()
     }
 
     private var projectName: (String) -> String {

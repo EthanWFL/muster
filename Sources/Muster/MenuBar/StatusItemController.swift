@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import SwiftUI
 
 @MainActor
@@ -7,7 +6,6 @@ final class StatusItemController: NSObject {
     private let model: PanelModel
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
-    private var pendingSubscription: AnyCancellable?
     private var resignObserver: NSObjectProtocol?
 
     init(model: PanelModel) {
@@ -26,12 +24,6 @@ final class StatusItemController: NSObject {
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-
-        pendingSubscription = model.$pending
-            .map(\.count)
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.updateBadge(count: $0) }
 
         SettingsCoordinator.shared.onOpenPanel = { [weak self] in
             // 热键总是回主视图，不要停在设置页
@@ -57,10 +49,6 @@ final class StatusItemController: NSObject {
         popover.performClose(nil)
     }
 
-    private func updateBadge(count: Int) {
-        statusItem.button?.title = count > 0 ? " \(count)" : ""
-    }
-
     @objc private func handleClick() {
         if NSApp.currentEvent?.type == .rightMouseUp {
             showMenu()
@@ -83,21 +71,10 @@ final class StatusItemController: NSObject {
     private func showMenu() {
         if popover.isShown { popover.performClose(nil) }
 
-        let count = model.pending.count
         let menu = NSMenu()
         menu.addItem(item(L10n.t("Open Muster"), #selector(openPanel)))
-        let status = NSMenuItem(
-            title: count > 0
-                ? L10n.t("%d approvals waiting", count)
-                : L10n.t("No pending approvals"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        status.isEnabled = false
-        menu.addItem(status)
         menu.addItem(.separator())
         menu.addItem(item(L10n.t("Settings…"), #selector(openSettings), key: ","))
-        menu.addItem(item(L10n.t("Install/Repair Hook"), #selector(installHook)))
         menu.addItem(item(L10n.t("Check for Updates…"), #selector(checkForUpdates)))
         menu.addItem(.separator())
         let version = NSMenuItem(
@@ -125,10 +102,6 @@ final class StatusItemController: NSObject {
     @objc private func openSettings() {
         showPanel()
         model.showsSettings = true
-    }
-    @objc private func installHook() {
-        showPanel()
-        model.requestHook(.install)
     }
     @objc private func checkForUpdates() { SettingsCoordinator.shared.checkForUpdates() }
     @objc private func quit() { NSApp.terminate(nil) }

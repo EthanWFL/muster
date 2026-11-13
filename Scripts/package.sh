@@ -25,7 +25,7 @@ BIN="$(swift build -c release --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-cp "$BIN/Muster" "$BIN/muster-hook" "$CONTENTS/MacOS/"
+cp "$BIN/Muster" "$CONTENTS/MacOS/"
 cp Resources/Info.plist "$CONTENTS/Info.plist"
 if [[ -d "$BIN/Muster_Muster.bundle" ]]; then
     cp -R "$BIN/Muster_Muster.bundle" "$CONTENTS/Resources/"
@@ -43,10 +43,9 @@ if [[ -f Resources/AppIcon.icns ]]; then
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$CONTENTS/Info.plist"
 fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
-chmod +x "$CONTENTS/MacOS/Muster" "$CONTENTS/MacOS/muster-hook"
+chmod +x "$CONTENTS/MacOS/Muster"
 
-# Sign inside-out; the hook is a separate executable and must be signed too.
-codesign --force --sign - "$CONTENTS/MacOS/muster-hook"
+# Sign the app for local use.
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 

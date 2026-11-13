@@ -18,7 +18,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
 }
 
 public enum SessionState: String, Codable, Sendable {
-    case running, waiting, idle, ended
+    case running, idle, ended
 }
 
 public struct Session: Identifiable, Equatable, Sendable {

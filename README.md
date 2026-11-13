@@ -1,6 +1,6 @@
 # Muster
 
-macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、残留进程清理，以及 6 个 agent 的共享指令同步收在一起。工具调用审批的代码还在，但面板入口暂时下线（见下文）。
+macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、残留进程清理、共享指令同步和模型配置收在一起。
 
 没有 Dock 图标（`LSUIElement`），点状态栏的蝠鲼或按 `⌃⌥A` 打开。
 
@@ -9,7 +9,7 @@ macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、
 ## 功能
 
 **会话（Sessions）**
-扫描本机进程，认出 Claude Code / Codex / Pi / DeepSeek Harness / Gemini CLI / Cursor / OpenCode 七个 CLI（直接启动的按可执行名，node 启动的按包路径判断），按 agent 分组。每行显示工作目录（悬停看全路径）和已运行时长，时长每秒自己走；右上角 `↻` 立即重扫，另有 15 秒自动重扫，进程退出后该行消失。进程扫到的会话会和 hook / transcript 里已有的记录合并，保留审批状态，启动时间取较早的那个。
+扫描本机进程，认出 Claude Code / Codex / Pi / DeepSeek Harness / Gemini CLI / Cursor / OpenCode 七个 CLI（直接启动的按可执行名，node 启动的按包路径判断），按 agent 分组。每行显示工作目录（悬停看全路径）和已运行时长，时长每秒自己走；右上角 `↻` 立即重扫，另有 15 秒自动重扫，进程结果会与 Claude transcript 记录合并，保留会话 ID 和较早的启动时间；transcript 中的近期活动用于推断运行与空闲状态，不再接收工具调用或审批事件。
 
 **环境（Environment）**
 三类残留：监听端口、孤儿进程、已合并但没删的 worktree。先给计划（哪条命令、影响什么对象），确认后才执行——展示和执行用的是同一份数据。归属靠启发式打分（命令行、父子进程树、cwd），拿不准的标「不确定」且默认不勾；删目录这类不可逆操作要再点一次确认。只有页面可见时才做完整扫描，后台每 10 秒采一次进程快照（孤儿判定需要历史）。
@@ -32,11 +32,15 @@ macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、
 
 面板里每套指令是一行可折叠的条目：点开即切换为该套并展开正文，名字可以直接在行内改（失焦保存），页脚有 `Markdown · ⌘S` 提示，`⌘S` 保存正文，新建的套在列表底部。
 
-**设置**
-全局热键 `⌃⌥A`、开机启动、系统通知、hook 的安装/卸载、tab 顺序、检查更新（发现新版本可以直接下载 DMG、就地换包并重启）。
+**配置（Configuration）**
+只展示本机已有配置文件的 Agent。Codex、Pi 可编辑用户级默认服务商和模型 ID，支持从本地模型列表选择或手动输入；Claude Code、Hermes、Cursor、Warp、Magpie 提供打开配置文件和 Finder 定位入口。Codex、Pi、Claude Code、Hermes 的配置目录分别遵循 `CODEX_HOME`、`PI_CODING_AGENT_DIR`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`。
 
-**审批（Approvals，暂时下线）**
-代码和 hook 链路都还在：Claude Code 的 `PreToolUse` hook 把请求送到面板，可以「允许 / 拒绝 / 允许同类 / 永久允许」，同类规则按命令前两个 token 匹配、高危不给这个选项。下线的原因有两个：链路只接了 Claude Code，而且会拦下**所有**工具调用，每个最多等 90 秒——对「agent 全权限」的用法反而更麻烦。之后会改成只拦高危操作，并接上 Codex / Gemini CLI / Cursor / Pi / DeepSeek Harness / OpenCode 的钩子，再重新打开。
+先预览字段变更再保存，只替换目标字段，保留其他内容、格式和注释。写入前在 `~/Library/Application Support/Muster/configuration-backups/` 保存一份私有备份；仅当前文件仍与上次写入一致时允许恢复。检测到文件被其他程序修改会停止保存，需重新读取。符号链接保留，写入其目标文件。
+
+第一版不编辑认证信息、不查询远端模型，也不热切换正在运行的会话。项目配置、Profile 和启动参数仍可能覆盖用户级默认值。Codex 顶层多行 TOML 值暂不支持表单编辑，遇到此类写法请使用原文件入口；表内内容保持原样。
+
+**设置**
+全局热键 `⌃⌥A`、开机启动、语言、tab 顺序、检查更新（发现新版本可以直接下载 DMG、就地换包并重启）。
 
 中英文两套文案，跟随系统语言。
 
@@ -60,22 +64,16 @@ swift run Muster                   # 开发时直接跑，不用打包
 
 首次打开：app 是 **ad-hoc 签名**，会被 Gatekeeper 拦一次，去「系统设置 → 隐私与安全性」点「仍要打开」。
 
-会话、环境、指令三页不需要任何 agent 配置。审批页下线期间**先别装 hook**：装了之后 Claude Code 的每个工具调用都会静默等 90 秒才放行，面板却没法处理。等风险门做完再开放安装。
+会话、环境、指令页无需安装 Hook。审批功能已移除；以前安装过 Muster Hook 的用户，请按[旧 Hook 清理说明](docs/remove-legacy-hook.md)移除遗留配置。Muster 不会自动修改现有 Claude 权限规则。
 
 ---
 
 ## 工作原理
 
-```
-Claude Code ──PreToolUse──▶ muster-hook ──unix socket──▶ Muster.app
-                                                          └─▶ 面板 / 通知
-```
-
-- **fail-safe，不是 fail-open**：`muster-hook` 遇到任何异常（stdin 不合法、连不上、超时、回包非法）都输出「无决策」并 `exit 0`，Claude Code 回落到自己的确认提示。Muster 没开或崩了，行为等同没装。
-- socket 默认 `~/Library/Application Support/Muster/agentd.sock`，目录权限 `0700`；可用 `MUSTER_SOCK` 覆盖（hook 和 app 读同一个变量）。
-- 超时：hook 侧 120 秒（`settings.json` 里显式写，不写会被 Claude Code 默认值提前杀掉），app 侧 TTL 90 秒。
-- 备份与配置都在 `~/Library/Application Support/Muster/`。
-- 审批链路（`PreToolUse` hook）只在 Claude Code 上接了，且面板入口暂时下线；会话、环境、指令三页都不依赖 hook。
+- 会话：每 15 秒读取本机进程和 Claude transcript 的头尾元数据，不保存对话正文。
+- 环境：基于进程和工作树信息生成清理计划，确认后执行。
+- 指令与配置：写入目标文件前保留备份，数据存于 `~/Library/Application Support/Muster/`。
+- 应用不运行审批 socket、不拦截 Agent 工具调用，也不请求审批通知权限。
 
 ---
 
@@ -83,10 +81,8 @@ Claude Code ──PreToolUse──▶ muster-hook ──unix socket──▶ Mus
 
 ```
 Sources/
-  MusterProtocol/   协议与 socket 路径，hook 和 app 共用，零依赖
-  MusterCore/       纯逻辑：适配器、审批、会话扫描、清理计划、指令同步
+  MusterCore/       纯逻辑：会话扫描、清理计划、指令同步、配置读写
   Muster/           SwiftUI app（菜单栏 + 面板 + 设置），仅 UI 与装配
-  muster-hook/      hook 客户端，只依赖 Protocol，冷启动要快
 Tests/              单元测试（逻辑层为主，UI 很少）
 Resources/          Info.plist、AppIcon.icns（打包用）
 Scripts/            package.sh、test.sh、make-icon.py
@@ -97,7 +93,7 @@ Scripts/            package.sh、test.sh、make-icon.py
 ## 开发
 
 ```bash
-Scripts/test.sh          # 280 个测试 / 39 个 suite（只要 CLT 也能跑）
+Scripts/test.sh --no-parallel  # 运行测试（只要 CLT 也能跑）
 Scripts/package.sh       # 打 .app
 python3 Scripts/make-icon.py   # 从蝠鲼动效重新生成 AppIcon.icns（需要 Pillow）
 ```
@@ -117,6 +113,5 @@ release 里的 DMG 必须叫 `*.dmg`，app 的检查更新会挑第一个匹配�
 ## 已知限制
 
 - 无 Developer ID、无公证：别人首次打开要手动放行；换包更新是重新 ad-hoc 签名，登录项和系统权限可能要求重新授权。
-- 审批页暂时下线；审批链路目前也只有 Claude Code，其他 agent 只支持指令同步与会话展示。
 - 更新下载没有进度条（网络慢时会看起来像卡住）。
 - 仓库暂未声明许可证。

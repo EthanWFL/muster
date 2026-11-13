@@ -1,5 +1,4 @@
 import MusterCore
-import MusterProtocol
 import SwiftUI
 
 // MARK: - Buttons
@@ -8,6 +7,7 @@ import SwiftUI
 struct PillButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, quiet }
     let kind: Kind
+    @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -22,8 +22,11 @@ struct PillButtonStyle: ButtonStyle {
                     Capsule().strokeBorder(kind == .quiet ? .clear : T.line, lineWidth: 0.5)
                 }
             }
+            .overlay(Capsule().fill(T.fg.opacity(hovering && isEnabled ? 0.06 : 0)))
             .brightness(configuration.isPressed ? -0.06 : 0)
             .opacity(isEnabled ? 1 : 0.4)
+            .onHover { hovering = $0 }
+            .pointerCursor()
     }
 
     private var foreground: Color {
@@ -58,27 +61,18 @@ struct ShortcutLabel: View {
 
 // MARK: - Segmented control
 
-/// 自绘分段控件。不用系统 `Picker(.segmented)`：轨道深度、圆角和配色都对不上，也放不下计数角标。
+/// 自绘分段控件，沿用面板的轨道、圆角和配色。
 struct SegmentedControl<Value: Hashable>: View {
     let items: [Value]
     @Binding var selection: Value
     let label: (Value) -> String
-    var badge: (Value) -> Int? = { _ in nil }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(items, id: \.self) { item in
                 let on = selection == item
                 Button { selection = item } label: {
-                    HStack(spacing: 4) {
-                        Text(label(item))
-                        if let n = badge(item), n > 0 {
-                            Text("\(n)")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .monospacedDigit()
-                                .foregroundStyle(on ? T.fg2 : T.faint)
-                        }
-                    }
+                    Text(label(item))
                     .font(.system(size: 11.5, weight: on ? .semibold : .regular))
                     .foregroundStyle(on ? T.fg : T.ctlFg)
                     .frame(maxWidth: .infinity, minHeight: 24)
@@ -93,7 +87,7 @@ struct SegmentedControl<Value: Hashable>: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(InteractivePlainButtonStyle())
             }
         }
         .padding(2)
@@ -102,18 +96,16 @@ struct SegmentedControl<Value: Hashable>: View {
     }
 }
 
-/// 面板顶部的 tab 条：就是带计数角标的分段控件，顺序由设置页决定。
+/// 面板顶部的 tab 条，顺序由设置页决定。
 struct SegmentedTabs: View {
     @Binding var selection: PanelModel.Tab
     let tabs: [PanelModel.Tab]
-    let badges: [PanelModel.Tab: Int]
 
     var body: some View {
         SegmentedControl(
             items: tabs,
             selection: $selection,
-            label: \.title,
-            badge: { badges[$0] })
+            label: \.title)
     }
 }
 
@@ -138,6 +130,7 @@ struct MiniSwitch: View {
             .animation(.snappy(duration: 0.16), value: isOn)
             .contentShape(Rectangle())
             .onTapGesture { isOn.toggle() }
+            .pointerCursor()
             .accessibilityElement()
             .accessibilityLabel(label)
             .accessibilityValue(isOn ? L10n.t("On") : L10n.t("Off"))
@@ -268,6 +261,7 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
     let label: (Item) -> String
     var header: String?
     var width: CGFloat = 168
+    var maxListHeight: CGFloat? = nil
     /// 展开方向：`.leading` 让列表从按钮左边缘往右展开（面板左侧的入口用），
     /// `.trailing` 让列表右对齐（设置页右侧的入口用）
     var alignment: HorizontalAlignment = .trailing
@@ -283,7 +277,7 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                 withAnimation(.snappy(duration: 0.16)) { open.toggle() }
             } label: {
                 HStack(spacing: 4) {
-                    Text(label(selection)).font(.system(size: 11.5, weight: .medium))
+                    Text(label(selection)).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(T.glyph)
                 }
@@ -293,7 +287,7 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                 .background(Capsule().fill(T.pill))
                 .overlay(Capsule().strokeBorder(T.line, lineWidth: 0.5))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InteractivePlainButtonStyle())
             // 浮层挂在按钮下方，不占布局：卡片高度不变，选项盖在内容之上
             .overlay(alignment: alignment == .leading ? .topLeading : .topTrailing) {
                 if open {
@@ -327,6 +321,26 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                     .padding(.top, T.s1)
                     .padding(.bottom, 2)
             }
+            if let maxListHeight {
+                ScrollView { options }
+                    .frame(height: min(maxListHeight, CGFloat(items.count) * 26))
+            } else {
+                options
+            }
+            footer()
+        }
+        .padding(.vertical, T.s1)
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
+        .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
+            .strokeBorder(T.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 6)
+        .onHover(perform: trackHover)
+    }
+
+    private var options: some View {
+        VStack(spacing: 0) {
             ForEach(items, id: \.self) { item in
                 Button {
                     selection = item
@@ -345,18 +359,9 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                     .contentShape(Rectangle())
                     .hoverHighlight()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(InteractivePlainButtonStyle())
             }
-            footer()
         }
-        .padding(.vertical, T.s1)
-        .frame(width: width)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
-        .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
-            .strokeBorder(T.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 6)
-        .onHover(perform: trackHover)
     }
 }
 
@@ -423,11 +428,12 @@ struct SectionTitle: View {
 /// 列表行悬停：只改底色，不加边框、不放大。
 struct HoverHighlight: ViewModifier {
     @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: T.r, style: .continuous)
-                .fill(hovering ? T.card2 : .clear))
+                .fill(hovering && isEnabled ? T.card2 : .clear))
             .onHover { hovering = $0 }
     }
 }
@@ -443,36 +449,6 @@ struct DetailLine: Identifiable {
     let id = UUID()
     let kind: Kind
     let text: String
-}
-
-/// 展开行里的命令原文 / 差异预览。内容只用于显示，不落盘。
-enum ToolDetail {
-    private static let maxLines = 6
-    private static let maxLineLength = 200
-
-    static func lines(for call: ToolCall) -> [DetailLine] {
-        let input = call.input
-        if let command = input["command"]?.stringValue {
-            return clipped(command, kind: .plain, prefix: "")
-        }
-        if let old = input["old_string"]?.stringValue, let new = input["new_string"]?.stringValue {
-            return clipped(old, kind: .remove, prefix: "- ") + clipped(new, kind: .add, prefix: "+ ")
-        }
-        if let content = input["content"]?.stringValue {
-            return clipped(content, kind: .add, prefix: "+ ")
-        }
-        return [DetailLine(kind: .plain, text: ToolSummary.line(tool: call.tool, input: input, cwd: call.cwd, maxLength: 400))]
-    }
-
-    private static func clipped(_ text: String, kind: DetailLine.Kind, prefix: String) -> [DetailLine] {
-        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
-        var out = all.prefix(maxLines).map { line -> DetailLine in
-            let s = line.count > maxLineLength ? String(line.prefix(maxLineLength)) + "…" : String(line)
-            return DetailLine(kind: kind, text: prefix + s)
-        }
-        if all.count > maxLines { out.append(DetailLine(kind: .context, text: "  … " + L10n.t("%d more lines", all.count - maxLines))) }
-        return out
-    }
 }
 
 struct CodeBlock: View {

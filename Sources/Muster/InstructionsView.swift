@@ -126,7 +126,7 @@ struct InstructionsView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InteractivePlainButtonStyle())
             if active {
                 Text(L10n.t("In use"))
                     .font(T.micro)
@@ -143,7 +143,7 @@ struct InstructionsView: View {
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InteractivePlainButtonStyle())
             .accessibilityLabel(open ? L10n.t("Collapse") : L10n.t("Expand"))
         }
         .padding(.horizontal, T.s3)
@@ -296,7 +296,7 @@ struct InstructionsView: View {
             .contentShape(Rectangle())
             .hoverHighlight()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(InteractivePlainButtonStyle())
     }
 }
 
@@ -339,7 +339,7 @@ private struct AgentRow: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(InteractivePlainButtonStyle())
                 .accessibilityLabel(L10n.t("Show the preview"))
                 MiniSwitch(isOn: Binding(get: { on }, set: { model.toggle(target, on: $0) }))
                     .disabled(!target.installed)

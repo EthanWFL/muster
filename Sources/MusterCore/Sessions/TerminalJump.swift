@@ -66,7 +66,7 @@ public struct TerminalJumper: Sendable {
         return (actual as NSString).standardizingPath == (expected as NSString).standardizingPath
     }
 
-    /// The hook reports the agent's start time; a reused PID in the same folder is not our session.
+    /// Compare the scanned process start time; a reused PID in the same folder is not our session.
     private func identityMatches(_ session: Session, _ record: ProcessRecord) -> Bool {
         guard let expected = session.pidStartTime else { return true }
         return startTimesMatch(expected, record.startTime, tolerance: 1)

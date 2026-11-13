@@ -30,7 +30,7 @@ struct SessionsView: View {
                             .frame(width: 20, height: 20)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(InteractivePlainButtonStyle())
                     .foregroundStyle(T.faint)
                     .help(L10n.t("Rescan open sessions"))
                     .padding(.trailing, T.s3)
@@ -79,8 +79,6 @@ private struct SessionRow: View {
     @ObservedObject var model: PanelModel
     let session: Session
 
-    private var pendingCount: Int { model.pending.filter { $0.sessionID == session.id }.count }
-
     var body: some View {
         HStack(spacing: T.s2) {
             StatusDot(tone: tone)
@@ -100,7 +98,7 @@ private struct SessionRow: View {
             HStack(spacing: 4) {
                 trailing
                     .font(T.small)
-                    .foregroundStyle(session.state == .waiting ? T.amber : T.muted)
+                    .foregroundStyle(T.muted)
                     .lineLimit(1)
                 Text("·")
                     .font(T.small)
@@ -114,7 +112,7 @@ private struct SessionRow: View {
             Button { model.jumpToTerminal(session) } label: {
                 Image(systemName: "terminal").font(.system(size: 11))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InteractivePlainButtonStyle())
             .foregroundStyle(T.faint)
             .help(L10n.t("Focus this session's terminal window. If it cannot be found, the folder path is copied."))
         }
@@ -126,10 +124,8 @@ private struct SessionRow: View {
 
     @ViewBuilder private var trailing: some View {
         switch session.state {
-        case .waiting where pendingCount > 0:
-            Text(pendingCount == 1 ? L10n.t("1 approval") : L10n.t("%d approvals", pendingCount))
         case .running:
-            Text(model.lastToolSummary(for: session.id) ?? L10n.t("Running"))
+            Text(L10n.t("Running"))
         default:
             Text(L10n.t("Idle"))
         }
@@ -138,7 +134,6 @@ private struct SessionRow: View {
     private var tone: StatusTone {
         switch session.state {
         case .running: return .busy
-        case .waiting: return .waiting
         case .idle, .ended: return .idle
         }
     }

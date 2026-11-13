@@ -133,12 +133,11 @@ struct Hairline: View {
 
 /// 颜色 + 形状双编码：失败不只靠红点，还叠一个 x 形，灰度下也读得出来。
 enum StatusTone {
-    case busy, waiting, failed, idle, neutral
+    case busy, failed, idle, neutral
 
     var color: Color {
         switch self {
         case .busy: return T.green
-        case .waiting: return T.amber
         case .failed: return T.red
         case .idle: return T.faint
         case .neutral: return T.muted
