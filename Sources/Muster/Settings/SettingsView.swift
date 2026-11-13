@@ -6,15 +6,16 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var model: PanelModel
+    @ObservedObject private var updates = SettingsCoordinator.shared
+    @State private var webhookResult: String?
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: T.s4) {
-                    startup
-                    appearance
-                    tabOrder
-                    shortcuts
+                VStack(alignment: .leading, spacing: T.s3) {
+                    general
+                    notifications
+                    interface
                     aboutAndUpdates
                 }
                 .padding(.horizontal, T.s3)
@@ -23,15 +24,16 @@ struct SettingsView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.visible)
-            .padding(.bottom, T.s3)
+            .padding(.bottom, T.s2)
         }
     }
 
     // MARK: 分区
 
-    private var startup: some View {
+    /// 开机启动 + 全局热键：一次启动设置，合成一张卡
+    private var general: some View {
         VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Startup"))
+            SectionTitle(text: L10n.t("General"))
             Card {
                 SettingsRow(label: L10n.t("Launch at login")) {
                     MiniSwitch(isOn: $store.launchAtLogin)
@@ -40,62 +42,15 @@ struct SettingsView: View {
                     Hairline()
                     notice(error, tone: .danger)
                 }
-                if store.launchAtLogin == false, store.loginItemError != nil {
-                    Hairline()
-                    notice(L10n.t("Launch at login requires the packaged app."), tone: .quiet)
-                }
-            }
-        }
-        .padding(.top, T.s2)
-    }
-
-    private var appearance: some View {
-        VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Appearance"))
-            Card {
-                SettingsRow(label: L10n.t("Language"), hint: L10n.t("Restart Muster to apply the language.")) {
-                    InlineSelect(
-                        items: L10n.Language.allCases.map(\.rawValue),
-                        label: { code in L10n.Language(rawValue: code)?.title ?? code },
-                        selection: Binding(
-                            get: { store.language.rawValue },
-                            set: { store.language = L10n.Language(rawValue: $0) ?? .system }))
-                }
-                .zIndex(1)
-            }
-        }
-        .zIndex(1)   // 语言下拉是浮层，整个分区要压在后续分区之上
-    }
-
-    private var tabOrder: some View {
-        VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Tab order"))
-            Card {
-                VStack(alignment: .leading, spacing: T.s2) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.t("Drag to reorder")).font(T.body).foregroundStyle(T.fg)
-                        Text(L10n.t("The panel shows tabs in this order."))
-                            .font(T.small)
-                            .foregroundStyle(T.muted)
-                    }
-                    TabOrderChips(model: model)
-                }
-                .padding(.horizontal, T.s3)
-                .padding(.vertical, T.s2)
-            }
-        }
-    }
-
-    private var shortcuts: some View {
-        VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Shortcuts"))
-            Card {
+                Hairline()
                 SettingsRow(label: L10n.t("Enable global hotkey")) {
                     MiniSwitch(isOn: $store.hotKeyEnabled)
                 }
-                Hairline()
-                SettingsRow(label: L10n.t("Global hotkey")) {
-                    Text("⌃⌥A").font(T.mono).foregroundStyle(T.fg2)
+                if store.hotKeyEnabled {
+                    Hairline()
+                    SettingsRow(label: L10n.t("Global hotkey")) {
+                        Text("⌃⌥A").font(T.mono).foregroundStyle(T.fg2)
+                    }
                 }
                 if let error = store.hotKeyError {
                     Hairline()
@@ -105,24 +60,134 @@ struct SettingsView: View {
         }
     }
 
-    /// 版本、更新与源码入口。
-    private var aboutAndUpdates: some View {
+    private var notifications: some View {
         VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("About & updates"))
+            SectionTitle(text: L10n.t("Notifications"))
             Card {
-                SettingsRow(label: "Muster", hint: L10n.t("Updates are checked against GitHub releases.")) {
-                    Text(store.appVersion).font(T.small).monospacedDigit().foregroundStyle(T.fg2)
+                SettingsRow(label: L10n.t("Notify when a session stops"),
+                            hint: L10n.t("A session with no new transcript lines counts as stopped.")) {
+                    MiniSwitch(isOn: $store.notificationsEnabled)
                 }
                 Hairline()
-                SettingsRow(label: L10n.t("Check for Updates…")) {
-                    Button(L10n.t("Check now")) { SettingsCoordinator.shared.checkForUpdates() }
+                SettingsRow(label: L10n.t("Feishu bot webhook"), hint: L10n.t("Optional custom bot URL.")) {
+                    HStack(spacing: T.s2) {
+                        MiniField(placeholder: "…/bot/v2/hook/…",
+                                  text: $store.feishuWebhook, width: 150)
+                        Button(L10n.t("Test")) {
+                            Task {
+                                webhookResult = await NotificationService.sendFeishu("Muster · " + L10n.t("Test message"))
+                                    ?? L10n.t("Sent.")
+                            }
+                        }
                         .buttonStyle(PillButtonStyle(kind: .secondary))
+                        .disabled(store.feishuWebhook.isEmpty)
+                    }
                 }
-                Hairline()
-                SettingsRow(label: L10n.t("Source code")) {
-                    linkLabel("GitHub", "https://github.com/EthanWFL/muster")
+                if let webhookResult {
+                    Hairline()
+                    notice(webhookResult, tone: .quiet)
                 }
             }
+        }
+    }
+
+    /// 语言 + 标签顺序：都只影响界面本身
+    private var interface: some View {
+        VStack(alignment: .leading, spacing: T.s2) {
+            SectionTitle(text: L10n.t("Interface"))
+            Card {
+                SettingsRow(label: L10n.t("Language")) {
+                    InlineSelect(
+                        items: L10n.Language.allCases.map(\.rawValue),
+                        label: { code in L10n.Language(rawValue: code)?.title ?? code },
+                        selection: Binding(
+                            get: { store.language.rawValue },
+                            set: { store.language = L10n.Language(rawValue: $0) ?? .system }))
+                }
+                Hairline()
+                VStack(alignment: .leading, spacing: T.s2) {
+                    Text(L10n.t("Drag the tabs to reorder them."))
+                        .font(T.small)
+                        .foregroundStyle(T.muted)
+                    TabOrderChips(model: model)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, T.s3)
+                .padding(.vertical, T.s2)
+            }
+        }
+        .zIndex(1)   // 语言下拉是浮层，这一区要压在后续分区之上
+    }
+
+    /// 版本、更新与源码入口：挤成一行
+    private var aboutAndUpdates: some View {
+        VStack(alignment: .leading, spacing: T.s2) {
+            SectionTitle(text: L10n.t("About"))
+            Card {
+                HStack(spacing: T.s2) {
+                    Text("Muster " + store.appVersion)
+                        .font(T.small).monospacedDigit().foregroundStyle(T.fg2)
+                    Spacer(minLength: T.s2)
+                    IconButton(symbol: "arrow.triangle.2.circlepath", label: L10n.t("Check for Updates…"), tint: T.ctlFg) {
+                        updates.checkForUpdates()
+                    }
+                    .disabled(updates.updateState == .checking || updates.updateState == .installing)
+                }
+                .padding(.horizontal, T.s3)
+                .frame(height: T.rowSingle)
+                if updates.updateState != .idle {
+                    Hairline()
+                    updateStatus
+                }
+            }
+        }
+    }
+
+    /// 检查结果就地显示：不弹窗，面板不会因为模态窗失焦而收起
+    private var updateStatus: some View {
+        HStack(spacing: T.s2) {
+            Text(updateMessage)
+                .font(T.small)
+                .foregroundStyle(updateTone)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: T.s2)
+            switch updates.updateState {
+            case .available(_, let page, let asset):
+                if let asset {
+                    Button(L10n.t("Download and Install")) { updates.install(asset) }
+                        .buttonStyle(PillButtonStyle(kind: .primary))
+                } else {
+                    Button(L10n.t("Open Releases")) { NSWorkspace.shared.open(page) }
+                        .buttonStyle(PillButtonStyle(kind: .secondary))
+                }
+            case .failed:
+                Button(L10n.t("Open Releases")) { NSWorkspace.shared.open(updates.releasesURL) }
+                    .buttonStyle(PillButtonStyle(kind: .secondary))
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, T.s3)
+        .padding(.vertical, T.s2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var updateMessage: String {
+        switch updates.updateState {
+        case .idle: return ""
+        case .checking: return L10n.t("Checking…")
+        case .upToDate: return L10n.t("Muster is up to date.")
+        case .available(let version, _, _): return L10n.t("Version %@ is available.", version)
+        case .installing: return L10n.t("Downloading and installing…")
+        case .failed(let message): return message
+        }
+    }
+
+    private var updateTone: Color {
+        switch updates.updateState {
+        case .failed: return T.red
+        case .available: return T.fg2
+        default: return T.muted
         }
     }
 
@@ -139,12 +204,6 @@ struct SettingsView: View {
             .padding(.vertical, T.s1)
     }
 
-    private func linkLabel(_ text: String, _ url: String) -> some View {
-        Link(text, destination: URL(string: url)!)
-            .font(.system(size: 11.5, weight: .medium))
-            .foregroundStyle(T.accent)
-            .pointerCursor()
-    }
 }
 
 /// 标签顺序：一行胶囊，直接拖动换位

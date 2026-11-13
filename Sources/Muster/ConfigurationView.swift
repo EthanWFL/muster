@@ -16,10 +16,9 @@ struct ConfigurationView: View {
                         }
                         .disabled(model.dirty)
                     Spacer()
-                    Button(L10n.t("Reload")) {
+                    IconButton(symbol: "arrow.clockwise", label: L10n.t("Reload")) {
                         if model.dirty { model.confirmingReload = true } else { model.reload() }
                     }
-                    .buttonStyle(PillButtonStyle(kind: .quiet))
                 }
                 .padding(.horizontal, T.s3)
                 .zIndex(2)
@@ -90,16 +89,18 @@ struct ConfigurationView: View {
 
                 SectionTitle(text: L10n.t("Configuration file"))
                 Card {
-                    VStack(alignment: .leading, spacing: T.s2) {
+                    HStack(spacing: T.s2) {
                         Text((selected.path as NSString).abbreviatingWithTildeInPath)
                             .font(T.monoMicro).foregroundStyle(T.fg2)
                             .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack {
-                            Button(L10n.t("Open file")) { model.openFile() }
-                            Button(L10n.t("Show in Finder")) { model.revealFile() }
-                        }.buttonStyle(PillButtonStyle(kind: .secondary))
-                    }.padding(T.s3)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        IconButton(symbol: "doc.text", label: L10n.t("Open file")) { model.openFile() }
+                        IconButton(symbol: "folder", label: L10n.t("Show in Finder")) { model.revealFile() }
+                    }
+                    .padding(.horizontal, T.s3)
+                    .padding(.vertical, T.s2)
                 }
             } else {
                 EmptyState(title: L10n.t("No configurations found"),

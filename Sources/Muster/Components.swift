@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 胶囊按钮。实心只给主操作，其余是 pill 底 + 发丝线描边，控件文字用 ctlFg 保证对比度。
 struct PillButtonStyle: ButtonStyle {
-    enum Kind { case primary, secondary, quiet }
+    enum Kind { case primary, secondary, quiet, danger }
     let kind: Kind
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
@@ -18,7 +18,9 @@ struct PillButtonStyle: ButtonStyle {
             .foregroundStyle(foreground)
             .background(Capsule().fill(fill))
             .overlay {
-                if kind != .primary {
+                if kind == .danger {
+                    Capsule().strokeBorder(T.red.opacity(0.35), lineWidth: 0.5)
+                } else if kind != .primary {
                     Capsule().strokeBorder(kind == .quiet ? .clear : T.line, lineWidth: 0.5)
                 }
             }
@@ -34,6 +36,7 @@ struct PillButtonStyle: ButtonStyle {
         case .primary: return .white
         case .secondary: return T.fg2
         case .quiet: return T.ctlFg
+        case .danger: return T.red
         }
     }
 
@@ -42,7 +45,29 @@ struct PillButtonStyle: ButtonStyle {
         case .primary: return T.accent
         case .secondary: return T.pill
         case .quiet: return .clear
+        case .danger: return T.red.opacity(0.10)
         }
+    }
+}
+
+/// 纯图标按钮：统一 20pt 点击区和图标字号；悬停提示同时作为无障碍标签。
+struct IconButton: View {
+    let symbol: String
+    let label: String
+    var tint: Color = T.faint
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(InteractivePlainButtonStyle())
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -56,6 +81,29 @@ struct ShortcutLabel: View {
             Text(title)
             Text(glyph).opacity(0.6)
         }
+    }
+}
+
+/// 卡片里的小输入框：和胶囊按钮同一套高度、圆角、发丝线。
+struct MiniField: View {
+    let placeholder: String
+    @Binding var text: String
+    var width: CGFloat?
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(T.mono)
+            .foregroundStyle(T.fg2)
+            .focused($focused)
+            .padding(.horizontal, 8)
+            .frame(width: width, height: 24)
+            .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
+            .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
+                .strokeBorder(focused ? T.accent : T.line, lineWidth: 0.5))
+            .accessibilityLabel(placeholder)
     }
 }
 
@@ -268,6 +316,8 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
     @Binding var selection: Item
     @ViewBuilder var footer: () -> Footer
 
+    private static var rowHeight: CGFloat { 24 }
+
     @State private var open = false
     @State private var closeTask: Task<Void, Never>?
 
@@ -276,16 +326,17 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
             Button {
                 withAnimation(.snappy(duration: 0.16)) { open.toggle() }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Text(label(selection)).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(T.glyph)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(open ? 180 : 0))
                 }
-                .foregroundStyle(T.fg2)
-                .padding(.horizontal, 8)
+                .foregroundStyle(open ? T.fg : T.ctlFg)
+                .padding(.horizontal, 9)
                 .frame(height: 24)
                 .background(Capsule().fill(T.pill))
-                .overlay(Capsule().strokeBorder(T.line, lineWidth: 0.5))
+                .overlay(Capsule().strokeBorder(open ? T.line : .clear, lineWidth: 0.5))
             }
             .buttonStyle(InteractivePlainButtonStyle())
             // 浮层挂在按钮下方，不占布局：卡片高度不变，选项盖在内容之上
@@ -317,13 +368,14 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                 Text(header)
                     .font(T.micro)
                     .foregroundStyle(T.muted)
-                    .padding(.horizontal, T.s2)
+                    .padding(.horizontal, T.s2 + T.s1)
                     .padding(.top, T.s1)
-                    .padding(.bottom, 2)
+                    .padding(.bottom, T.s1)
+                Hairline()
             }
             if let maxListHeight {
                 ScrollView { options }
-                    .frame(height: min(maxListHeight, CGFloat(items.count) * 26))
+                    .frame(height: min(maxListHeight, CGFloat(items.count) * Self.rowHeight))
             } else {
                 options
             }
@@ -335,13 +387,14 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
         .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
         .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
             .strokeBorder(T.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
         .onHover(perform: trackHover)
     }
 
     private var options: some View {
         VStack(spacing: 0) {
             ForEach(items, id: \.self) { item in
+                let on = item == selection
                 Button {
                     selection = item
                     withAnimation(.snappy(duration: 0.16)) { open = false }
@@ -349,17 +402,27 @@ struct InlineSelect<Item: Hashable, Footer: View>: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark")
                             .font(T.glyph)
-                            .foregroundStyle(T.fg2)
-                            .opacity(item == selection ? 1 : 0)
-                        Text(label(item)).font(T.body).foregroundStyle(T.fg).lineLimit(1)
+                            .foregroundStyle(T.accent)
+                            .opacity(on ? 1 : 0)
+                            .frame(width: 10)
+                        Text(label(item))
+                            .font(T.body)
+                            .foregroundStyle(on ? T.fg : T.fg2)
+                            .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, T.s2)
-                    .frame(height: 26)
+                    .padding(.horizontal, T.s1)
+                    .frame(height: Self.rowHeight)
+                    .background {
+                        if on {
+                            RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.accentSoft)
+                        }
+                    }
                     .contentShape(Rectangle())
                     .hoverHighlight()
                 }
                 .buttonStyle(InteractivePlainButtonStyle())
+                .padding(.horizontal, T.s1)
             }
         }
     }

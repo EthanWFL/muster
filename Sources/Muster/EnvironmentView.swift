@@ -174,7 +174,7 @@ private struct ReportCard: View {
             HStack {
                 Text(L10n.t("Cleanup result")).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(T.fg)
                 Spacer()
-                Button(L10n.t("Dismiss"), action: dismiss).buttonStyle(PillButtonStyle(kind: .quiet))
+                IconButton(symbol: "xmark", label: L10n.t("Dismiss"), action: dismiss)
             }
             ForEach(Array(report.entries.enumerated()), id: \.offset) { _, entry in
                 HStack(alignment: .firstTextBaseline, spacing: T.s2) {

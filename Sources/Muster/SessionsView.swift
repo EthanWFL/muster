@@ -24,15 +24,9 @@ struct SessionsView: View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("Active"), count: groups.reduce(0) { $0 + $1.sessions.count })
                 .overlay(alignment: .trailing) {
-                    Button { model.refreshSessions() } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
+                    IconButton(symbol: "arrow.clockwise", label: L10n.t("Rescan open sessions")) {
+                        model.refreshSessions()
                     }
-                    .buttonStyle(InteractivePlainButtonStyle())
-                    .foregroundStyle(T.faint)
-                    .help(L10n.t("Rescan open sessions"))
                     .padding(.trailing, T.s3)
                 }
 
@@ -82,12 +76,15 @@ private struct SessionRow: View {
     var body: some View {
         HStack(spacing: T.s2) {
             StatusDot(tone: tone)
+                .accessibilityElement()
+                .accessibilityLabel(session.state == .running ? L10n.t("Running") : L10n.t("Idle"))
             VStack(alignment: .leading, spacing: 0) {
                 Text(session.projectName)
                     .font(T.body)
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
-                Text((session.cwd as NSString).abbreviatingWithTildeInPath)
+                Text((session.cwd as NSString).abbreviatingWithTildeInPath
+                     + (session.branch.map { " · " + $0 } ?? ""))
                     .font(T.monoMicro)
                     .foregroundStyle(T.muted)
                     .lineLimit(1)
@@ -95,40 +92,25 @@ private struct SessionRow: View {
                     .help(session.cwd)
             }
             Spacer(minLength: T.s2)
-            HStack(spacing: 4) {
-                trailing
-                    .font(T.small)
-                    .foregroundStyle(T.muted)
-                    .lineLimit(1)
-                Text("·")
-                    .font(T.small)
-                    .foregroundStyle(T.faint)
-                Text(session.startedAt, style: .relative)
-                    .font(T.micro)
-                    .foregroundStyle(T.faint)
-                    .fixedSize()
+            Text(session.startedAt, style: .relative)
+                .font(T.micro)
+                .foregroundStyle(T.faint)
+                .fixedSize()
+            IconButton(
+                symbol: "terminal",
+                label: L10n.t("Focus this session's terminal window. If it cannot be found, the folder path is copied.")
+            ) { model.jumpToTerminal(session) }
+            if session.resumeCommand != nil {
+                IconButton(
+                    symbol: "arrow.uturn.backward.circle",
+                    label: L10n.t("Copy the command that resumes this session in its folder.")
+                ) { model.copyResume(session) }
             }
-            .frame(maxWidth: 190, alignment: .trailing)
-            Button { model.jumpToTerminal(session) } label: {
-                Image(systemName: "terminal").font(.system(size: 11))
-            }
-            .buttonStyle(InteractivePlainButtonStyle())
-            .foregroundStyle(T.faint)
-            .help(L10n.t("Focus this session's terminal window. If it cannot be found, the folder path is copied."))
         }
         .padding(.horizontal, T.s3)
         .frame(height: 40)
         .hoverHighlight()
         .contentShape(Rectangle())
-    }
-
-    @ViewBuilder private var trailing: some View {
-        switch session.state {
-        case .running:
-            Text(L10n.t("Running"))
-        default:
-            Text(L10n.t("Idle"))
-        }
     }
 
     private var tone: StatusTone {

@@ -36,7 +36,8 @@ def mark() -> Image.Image:
             r, g, b, a = pixels[x, y]
             if a > 128 and not (r > 200 and g > 200 and b > 200):
                 target[x, y] = 255
-    return mask.crop(mask.getbbox())
+    # 菜单栏静态图（MenuBarIcon）的尾巴向右弯；这一帧向左，翻转后两者一致
+    return mask.crop(mask.getbbox()).transpose(Image.FLIP_LEFT_RIGHT)
 
 
 def _frames(gif):

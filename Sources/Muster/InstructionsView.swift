@@ -10,7 +10,7 @@ struct InstructionsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: T.s2) {
-            SectionTitle(text: L10n.t("Shared instructions"))
+            SectionTitle(text: L10n.t("Shared rules"))
             Card {
                 ForEach(Array(model.sets.enumerated()), id: \.element.id) { index, set in
                     setSection(set)
@@ -22,15 +22,25 @@ struct InstructionsView: View {
                     Hairline()
                     createRow
                 }
-                if model.confirmingDelete { deleteConfirm }
+                if model.confirmingDelete {
+                    Hairline()
+                    deleteConfirm
+                }
                 Hairline()
                 HStack(spacing: T.s2) {
                     newSetButton
                     Spacer(minLength: T.s2)
-                    Text("Markdown · ⌘S")
-                        .font(T.micro)
-                        .foregroundStyle(T.faint)
-                    Button(model.isDirty ? L10n.t("Save") : L10n.t("Saved")) { model.saveNow() }
+                    if model.isDirty {
+                        HStack(spacing: 5) {
+                            Circle().fill(T.amber).frame(width: 5, height: 5)
+                            Text(L10n.t("Unsaved changes")).font(T.micro).foregroundStyle(T.muted)
+                        }
+                    } else {
+                        Text("Markdown").font(T.micro).foregroundStyle(T.faint)
+                    }
+                    Button { model.saveNow() } label: {
+                        ShortcutLabel(title: model.isDirty ? L10n.t("Save") : L10n.t("Saved"), glyph: "⌘S")
+                    }
                         .buttonStyle(PillButtonStyle(kind: model.isDirty ? .primary : .secondary))
                         .disabled(!model.isDirty)
                         .keyboardShortcut("s", modifiers: .command)
@@ -39,21 +49,19 @@ struct InstructionsView: View {
                 .frame(height: T.rowDouble)
             }
 
-            HStack(spacing: T.s2) {
-                SectionTitle(text: "AGENT", count: model.targets.count)
-                if model.targets.contains(where: { model.enabled($0.id) && model.isPending($0.id) }) {
-                    Button(L10n.t("Write to the enabled agents")) { model.writeAll() }
-                        .buttonStyle(PillButtonStyle(kind: .secondary))
-                        .padding(.trailing, T.s3)
-                        .padding(.top, T.s2)
+            SectionTitle(text: L10n.t("Agents"), count: model.targets.count)
+                .overlay(alignment: .trailing) {
+                    if model.targets.contains(where: { model.enabled($0.id) && model.isPending($0.id) }) {
+                        Button(L10n.t("Write to the enabled agents")) { model.writeAll() }
+                            .buttonStyle(PillButtonStyle(kind: .primary))
+                            .padding(.trailing, T.s3)
+                    }
                 }
-            }
-            .frame(height: T.rowCompact)
 
             if model.targets.isEmpty {
                 EmptyState(
                     title: L10n.t("No agents found"),
-                    message: L10n.t("Agents that keep a user-level instructions file show up here"))
+                    message: L10n.t("Agents that keep a user-level rules file show up here"))
             } else {
                 Card {
                     ForEach(Array(model.targets.enumerated()), id: \.element.id) { index, target in
@@ -89,7 +97,20 @@ struct InstructionsView: View {
                     .foregroundStyle(T.fg2)
                     .scrollContentBackground(.hidden)
                     .frame(height: editorHeight)
-                    .padding(.horizontal, T.s2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, T.s1)
+                    .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
+                    .overlay(alignment: .topLeading) {
+                        if model.draft.isEmpty {
+                            Text(L10n.t("Write the rules every agent should read, in Markdown…"))
+                                .font(T.mono).foregroundStyle(T.faint)
+                                .padding(.horizontal, 11).padding(.vertical, 9)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
+                        .strokeBorder(T.line, lineWidth: 0.5))
+                    .padding(.horizontal, T.s3)
                     .padding(.top, T.s1)
                 Text(L10n.t("Only the text between the two marker lines is written; the rest of each file stays yours."))
                     .font(T.micro)
@@ -127,14 +148,6 @@ struct InstructionsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(InteractivePlainButtonStyle())
-            if active {
-                Text(L10n.t("In use"))
-                    .font(T.micro)
-                    .foregroundStyle(T.muted)
-                    .padding(.horizontal, 6)
-                    .frame(height: 18)
-                    .background(Capsule().fill(T.pill))
-            }
             if open && !isDefault(set) { setMenuButton }
             Button { toggle(set) } label: {
                 Image(systemName: open ? "chevron.down" : "chevron.right")
@@ -201,22 +214,10 @@ struct InstructionsView: View {
     private func isDefault(_ set: InstructionSet) -> Bool { set.id == InstructionSet.defaultID }
 
     private var setMenuButton: some View {
-        Menu {
-            setAction(L10n.t("Delete this set…")) {
-                model.creatingSet = false
-                model.confirmingDelete = true
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(T.glyph)
-                .foregroundStyle(T.faint)
-                .frame(width: 20, height: 20)
-                .contentShape(Rectangle())
+        IconButton(symbol: "trash", label: L10n.t("Delete this set")) {
+            model.creatingSet = false
+            model.confirmingDelete = true
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(L10n.t("Set actions"))
     }
 
     private var newSetButton: some View {
@@ -248,16 +249,14 @@ struct InstructionsView: View {
                 .frame(height: 24)
                 .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
                 .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
-                    .strokeBorder(T.accent, lineWidth: 1))
+                    .strokeBorder(T.line, lineWidth: 0.5))
                 .onSubmit { model.createSet() }
-            Button(L10n.t("Save")) { model.createSet() }
-                .buttonStyle(PillButtonStyle(kind: .primary))
+            IconButton(symbol: "checkmark", label: L10n.t("Save"), tint: T.accent) { model.createSet() }
                 .disabled(model.setName.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button(L10n.t("Cancel")) {
+            IconButton(symbol: "xmark", label: L10n.t("Cancel")) {
                 model.creatingSet = false
                 model.setName = ""
             }
-            .buttonStyle(PillButtonStyle(kind: .secondary))
         }
         .padding(.horizontal, T.s3)
         .padding(.vertical, T.s2)
@@ -271,7 +270,7 @@ struct InstructionsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: T.s2)
             Button(L10n.t("Delete")) { model.deleteActiveSet() }
-                .buttonStyle(PillButtonStyle(kind: .primary))
+                .buttonStyle(PillButtonStyle(kind: .danger))
             Button(L10n.t("Cancel")) {
                 model.confirmingDelete = false
             }
@@ -283,20 +282,6 @@ struct InstructionsView: View {
 
     private func name(of set: InstructionSet) -> String {
         set.id == InstructionSet.defaultID ? L10n.t("Default") : set.name
-    }
-
-    private func setAction(_ title: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text(title).font(T.small).foregroundStyle(T.fg2)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, T.s2)
-            .frame(height: 24)
-            .contentShape(Rectangle())
-            .hoverHighlight()
-        }
-        .buttonStyle(InteractivePlainButtonStyle())
     }
 }
 
@@ -317,8 +302,9 @@ private struct AgentRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: T.s2) {
                 AgentLogo(agentID: target.id, mark: mark)
+                    .opacity(on ? 1 : 0.5)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(target.name).font(T.body).foregroundStyle(T.fg).lineLimit(1)
+                    Text(target.name).font(T.body).foregroundStyle(on ? T.fg : T.fg2).lineLimit(1)
                     Text(target.abbreviatedPath)
                         .font(T.monoMicro)
                         .foregroundStyle(T.muted)
@@ -329,7 +315,12 @@ private struct AgentRow: View {
                         } ?? target.path)
                 }
                 Spacer(minLength: T.s2)
-                Text(statusLabel).font(T.micro).foregroundStyle(statusColor).lineLimit(1)
+                if !statusLabel.isEmpty {
+                    HStack(spacing: 5) {
+                        if target.installed { Circle().fill(statusColor).frame(width: 5, height: 5) }
+                        Text(statusLabel).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
+                    }
+                }
                 Button {
                     if expanded { model.expanded.remove(target.id) } else { model.expanded.insert(target.id) }
                 } label: {
@@ -382,7 +373,8 @@ private struct AgentRow: View {
             }
             backupRow
         }
-        .padding(.horizontal, T.s3)
+        .padding(.leading, T.s3 + 18 + T.s2)
+        .padding(.trailing, T.s3)
         .padding(.bottom, T.s2)
     }
 
@@ -394,9 +386,10 @@ private struct AgentRow: View {
                     .foregroundStyle(T.faint)
                     .lineLimit(1)
                 Spacer(minLength: T.s2)
-                Button(L10n.t("Restore")) { model.restore(latest, to: target) }
-                    .buttonStyle(PillButtonStyle(kind: .quiet))
-                    .help(L10n.t("The current file is backed up first, so this can be undone too."))
+                IconButton(
+                    symbol: "clock.arrow.circlepath",
+                    label: L10n.t("Restore this backup. The current file is backed up first, so this can be undone too.")
+                ) { model.restore(latest, to: target) }
             }
         }
     }
@@ -459,7 +452,7 @@ private struct AgentRow: View {
         switch plan.action {
         case .create, .update, .remove: return T.amber
         case .skipped("edited in the file"): return T.amber
-        case .unchanged: return T.muted
+        case .unchanged: return on ? T.green : T.faint
         case .skipped: return T.faint
         }
     }

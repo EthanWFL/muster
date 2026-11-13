@@ -24,10 +24,21 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(hotKeyEnabled, forKey: Self.hotKeyKey) }
     }
 
+    @Published var notificationsEnabled: Bool {
+        didSet { defaults.set(notificationsEnabled, forKey: Self.notificationsKey) }
+    }
+
+    /// shortcut: 明文放 UserDefaults；webhook 只能发消息不能读，要更稳时再迁到 Keychain
+    @Published var feishuWebhook: String {
+        didSet { defaults.set(feishuWebhook, forKey: Self.feishuKey) }
+    }
+
     @Published private(set) var loginItemError: String?
     @Published var hotKeyError: String?
 
     private static let hotKeyKey = "MusterHotKeyEnabled"
+    private static let notificationsKey = "MusterNotificationsEnabled"
+    private static let feishuKey = "MusterFeishuWebhook"
     private let defaults = UserDefaults.standard
     private var applyingLoginStatus = false
 
@@ -35,6 +46,8 @@ final class SettingsStore: ObservableObject {
         language = L10n.Language(rawValue: defaults.string(forKey: L10n.languageKey) ?? "") ?? .system
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hotKeyEnabled = defaults.object(forKey: Self.hotKeyKey) as? Bool ?? true
+        notificationsEnabled = defaults.object(forKey: Self.notificationsKey) as? Bool ?? true
+        feishuWebhook = defaults.string(forKey: Self.feishuKey) ?? ""
     }
 
     var appVersion: String {

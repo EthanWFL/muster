@@ -12,25 +12,34 @@ public enum Diagnostics {
     }
 }
 
-/// Infers Claude Code sessions from `<projectsRoot>/<encoded-cwd>/<sessionId>.jsonl`.
+/// Infers sessions from JSONL transcripts `depth` levels below `projectsRoot`:
+/// Claude `projects/<cwd>/<id>.jsonl` (2), Pi `sessions/<cwd>/<ts>_<id>.jsonl` (2),
+/// Codex `sessions/Y/M/D/rollout-*.jsonl` (4). Gemini, Cursor, OpenCode and DeepSeek Harness
+/// use other layouts or compression and are not scanned.
 ///
 /// Only the head and the tail of each file are read (bounded chunks); a transcript is never
 /// loaded whole and no conversation text is kept. Only `sessionId`, `cwd` and `timestamp`
-/// are decoded from each line; every other field is ignored.
-public struct ClaudeTranscriptScanner: Sendable {
+/// are decoded from each line (Codex and Pi keep them in their first `session_meta` / `session`
+/// line); every other field is ignored.
+public struct TranscriptScanner: Sendable {
     /// Bytes read from the start and from the end of each file.
     public static let chunkSize = 64 * 1024
 
+    public let agent: AgentKind
+    public let depth: Int
     public let projectsRoot: URL
     public let clock: Clock
     public let retention: TimeInterval
     public let log: DiagnosticSink
 
     public init(
+        agent: AgentKind = .claude, depth: Int = 2,
         projectsRoot: URL, clock: Clock = SystemClock(),
         retention: TimeInterval = SessionPolicy.defaultRetention,
         log: @escaping DiagnosticSink = Diagnostics.default
     ) {
+        self.agent = agent
+        self.depth = depth
         self.projectsRoot = projectsRoot
         self.clock = clock
         self.retention = retention
@@ -39,9 +48,18 @@ public struct ClaudeTranscriptScanner: Sendable {
 
     /// The only fields we depend on.
     struct Line: Decodable {
+        var type: String?
         var sessionId: String?
+        var id: String?
         var cwd: String?
         var timestamp: String?
+        var payload: Payload?
+        struct Payload: Decodable { var id: String?; var cwd: String? }
+
+        var sessionID: String? {
+            sessionId ?? (type == "session" ? id : nil) ?? (type == "session_meta" ? payload?.id : nil)
+        }
+        var workingDirectory: String? { cwd ?? (type == "session_meta" ? payload?.cwd : nil) }
     }
 
     public func scan() throws -> [Session] {
@@ -49,19 +67,15 @@ public struct ClaudeTranscriptScanner: Sendable {
         guard fm.fileExists(atPath: projectsRoot.path) else { return [] }
         let cutoff = clock.now().addingTimeInterval(-retention)
         var result: [Session] = []
-        let dirs = try fm.contentsOfDirectory(
-            at: projectsRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-        for dir in dirs {
-            guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            let files = (try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-                options: [.skipsHiddenFiles])) ?? []
-            for file in files where file.pathExtension == "jsonl" {
-                guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
-                      values.isRegularFile == true, let mtime = values.contentModificationDate,
-                      mtime >= cutoff else { continue }
-                if let session = inspect(file: file, mtime: mtime) { result.append(session) }
-            }
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        let files = fm.enumerator(at: projectsRoot, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
+        // shortcut: walks the whole tree each scan, upgrade if Codex's per-day dirs get too many
+        while let file = files?.nextObject() as? URL {
+            guard files?.level == depth, file.pathExtension == "jsonl",
+                  let values = try? file.resourceValues(forKeys: Set(keys)),
+                  values.isRegularFile == true, let mtime = values.contentModificationDate,
+                  mtime >= cutoff else { continue }
+            if let session = inspect(file: file, mtime: mtime) { result.append(session) }
         }
         return result.sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
@@ -77,14 +91,14 @@ public struct ClaudeTranscriptScanner: Sendable {
         }
         let all = head + tail
         let stem = file.deletingPathExtension().lastPathComponent
-        let id = all.compactMap(\.sessionId).first ?? stem
-        guard let cwd = head.compactMap(\.cwd).first ?? tail.compactMap(\.cwd).first else {
+        let id = all.compactMap(\.sessionID).first ?? stem
+        guard let cwd = head.compactMap(\.workingDirectory).first ?? tail.compactMap(\.workingDirectory).first else {
             log("skip \(name): no cwd in head or tail")
             return nil
         }
         let parser = TimestampParser()
         let started = head.compactMap { $0.timestamp.flatMap(parser.parse) }.first ?? mtime
-        return Session(id: id, agent: .claude, cwd: cwd, startedAt: min(started, mtime),
+        return Session(id: id, agent: agent, cwd: cwd, startedAt: min(started, mtime),
                        lastActivityAt: mtime, state: .idle)
     }
 

@@ -10,15 +10,35 @@ final class PanelModel: ObservableObject {
     private var liveSessions: [Session] = []
     private let sessionStore = SessionStore()
     private let terminalJumper = TerminalJumper()
-    private let scanner = ClaudeTranscriptScanner(
-        projectsRoot: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects"))
+    private let notifier = NotificationService()
+    private let scanners: [TranscriptScanner] = {
+        let env = ProcessInfo.processInfo.environment
+        func root(_ key: String, _ fallback: String, _ sub: String) -> URL {
+            let base = env[key].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(fallback)
+            return base.appendingPathComponent(sub)
+        }
+        return [
+            TranscriptScanner(agent: .claude, projectsRoot: root("CLAUDE_CONFIG_DIR", ".claude", "projects")),
+            TranscriptScanner(agent: .codex, depth: 4, projectsRoot: root("CODEX_HOME", ".codex", "sessions")),
+            TranscriptScanner(agent: .pi, projectsRoot: root("PI_CODING_AGENT_DIR", ".pi/agent", "sessions")),
+        ]
+    }()
     private var diskTimer: Timer?
 
     enum Tab: String, CaseIterable {
         case sessions = "Sessions", environment = "Environment",
              instructions = "Instructions", configuration = "Configuration"
 
-        var title: String { L10n.t(rawValue) }
+        /// rawValue 存在偏好里，保持不变；显示名单独映射
+        var title: String {
+            switch self {
+            case .sessions: return L10n.t("Sessions")
+            case .environment: return L10n.t("Cleanup")
+            case .instructions: return L10n.t("Rules")
+            case .configuration: return L10n.t("Configuration")
+            }
+        }
     }
 
     @Published var tab: Tab = PanelModel.storedTab() {
@@ -63,6 +83,7 @@ final class PanelModel: ObservableObject {
     let configuration = ConfigurationModel()
 
     func start() {
+        notifier.start()
         env.sessionsProvider = { [weak self] in self?.sessions ?? [] }
         env.startSampling()
         refreshSessions()
@@ -93,6 +114,13 @@ final class PanelModel: ObservableObject {
         }
     }
 
+    func copyResume(_ session: Session) {
+        guard let command = session.resumeCommand else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        notice = L10n.t("Resume command copied · %@", command)
+    }
+
     /// 合并 transcript 和进程扫描，保留会话 ID、较早的开始时间及可用于终端跳转的 PID。
     private func refresh() {
         var list = sessionStore.sessions().filter { $0.state != .ended }
@@ -108,7 +136,10 @@ final class PanelModel: ObservableObject {
                 list.append(live)
             }
         }
+        for index in list.indices { list[index].branch = SessionInsights.branch(cwd: list[index].cwd) }
+        let finished = SessionInsights.finished(from: sessions, to: list)
         sessions = list
+        if !finished.isEmpty { notifier.notifyFinished(finished) }
     }
 
     func refreshSessions() {
@@ -120,10 +151,12 @@ final class PanelModel: ObservableObject {
                 refresh()
             }
         }
-        let scanner = scanner
+        let scanners = scanners
         let store = sessionStore
         Task.detached(priority: .utility) { [weak self] in
-            if let found = try? scanner.scan() { store.mergeDisk(found) }
+            for scanner in scanners {
+                if let found = try? scanner.scan() { store.mergeDisk(found) }
+            }
             await self?.refresh()
         }
     }

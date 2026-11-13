@@ -35,6 +35,7 @@ public struct WorktreeScanner: Sendable {
     }
 
     public func scan(repoAt cwd: String) throws -> [WorktreeInfo] {
+        guard !ProtectedFolders.contains(cwd) else { return [] }
         let list = try runner.run(["git", "worktree", "list", "--porcelain"], cwd: cwd)
         guard list.status == 0 else {
             throw WorktreeScanError.gitFailed(status: list.status, stderr: list.stderr)
@@ -43,7 +44,7 @@ public struct WorktreeScanner: Sendable {
         guard let main = entries.first else { return [] }
 
         var mergedBranches: Set<String> = []
-        if let base = main.branch {
+        if let base = main.branch, !ProtectedFolders.contains(main.path) {
             let merged = try? runner.run(
                 ["git", "branch", "--merged", base, "--format=%(refname:short)"], cwd: main.path)
             if let merged, merged.status == 0 {

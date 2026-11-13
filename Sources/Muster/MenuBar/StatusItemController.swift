@@ -103,6 +103,10 @@ final class StatusItemController: NSObject {
         showPanel()
         model.showsSettings = true
     }
-    @objc private func checkForUpdates() { SettingsCoordinator.shared.checkForUpdates() }
+    /// 结果显示在设置页里，所以先把面板带到设置页再检查
+    @objc private func checkForUpdates() {
+        openSettings()
+        SettingsCoordinator.shared.checkForUpdates()
+    }
     @objc private func quit() { NSApp.terminate(nil) }
 }

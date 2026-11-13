@@ -1,6 +1,6 @@
 # Muster
 
-macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、残留进程清理、共享指令同步和模型配置收在一起。
+macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、残留进程清理、共享规则同步和模型配置收在一起。
 
 没有 Dock 图标（`LSUIElement`），点状态栏的蝠鲼或按 `⌃⌥A` 打开。
 
@@ -9,13 +9,13 @@ macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、
 ## 功能
 
 **会话（Sessions）**
-扫描本机进程，认出 Claude Code / Codex / Pi / DeepSeek Harness / Gemini CLI / Cursor / OpenCode 七个 CLI（直接启动的按可执行名，node 启动的按包路径判断），按 agent 分组。每行显示工作目录（悬停看全路径）和已运行时长，时长每秒自己走；右上角 `↻` 立即重扫，另有 15 秒自动重扫，进程结果会与 Claude transcript 记录合并，保留会话 ID 和较早的启动时间；transcript 中的近期活动用于推断运行与空闲状态，不再接收工具调用或审批事件。
+扫描本机进程，认出 Claude Code / Codex / Pi / DeepSeek Harness / Gemini CLI / Cursor / OpenCode 七个 CLI（直接启动的按可执行名，node 启动的按包路径判断），按 agent 分组。每行显示工作目录（悬停看全路径）和已运行时长，时长每秒自己走；右上角 `↻` 立即重扫，另有 15 秒自动重扫，进程结果会与本地 transcript 记录合并（Claude Code、Codex、Pi，只读文件头尾，不留对话内容；其余 agent 状态恒为运行），保留会话 ID 和较早的启动时间；transcript 中的近期活动用于推断运行与空闲状态，不再接收工具调用或审批事件。行内显示 git 分支，可一键复制「cd 到原目录并 resume」的命令（Claude Code、Codex、Pi）。会话从运行变空闲时发系统通知；设置里填飞书自定义机器人 webhook 可同步推送。
 
-**环境（Environment）**
+**清理（Cleanup）**
 三类残留：监听端口、孤儿进程、已合并但没删的 worktree。先给计划（哪条命令、影响什么对象），确认后才执行——展示和执行用的是同一份数据。归属靠启发式打分（命令行、父子进程树、cwd），拿不准的标「不确定」且默认不勾；删目录这类不可逆操作要再点一次确认。只有页面可见时才做完整扫描，后台每 10 秒采一次进程快照（孤儿判定需要历史）。
 
-**指令（Instructions）**
-把一份共享指令写进 6 个 agent 的用户级 md（只列用户级，仓库里的 `AGENTS.md` 不在范围内）：
+**规则（Rules）**
+把一份共享规则写进 6 个 agent 的用户级 md（只列用户级，仓库里的 `AGENTS.md` 不在范围内）：
 
 | agent | 写入文件（按优先级） |
 |---|---|
@@ -30,7 +30,7 @@ macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、
 
 只替换 `<!-- muster:begin · written by Muster from its shared instructions -->` 到 `<!-- muster:end -->` 之间的块，文件里原有的内容一行不动；写之前看 diff，写完留备份，可以随时还原。
 
-面板里每套指令是一行可折叠的条目：点开即切换为该套并展开正文，名字可以直接在行内改（失焦保存），页脚有 `Markdown · ⌘S` 提示，`⌘S` 保存正文，新建的套在列表底部。
+面板里每套规则是一行可折叠的条目：点开即切换为该套并展开正文，名字可以直接在行内改（失焦保存），页脚有 `Markdown · ⌘S` 提示，`⌘S` 保存正文，新建的套在列表底部。
 
 **配置（Configuration）**
 只展示本机已有配置文件的 Agent。Codex、Pi 可编辑用户级默认服务商和模型 ID，支持从本地模型列表选择或手动输入；Claude Code、Hermes、Cursor、Warp、Magpie 提供打开配置文件和 Finder 定位入口。Codex、Pi、Claude Code、Hermes 的配置目录分别遵循 `CODEX_HOME`、`PI_CODING_AGENT_DIR`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`。
@@ -64,15 +64,15 @@ swift run Muster                   # 开发时直接跑，不用打包
 
 首次打开：app 是 **ad-hoc 签名**，会被 Gatekeeper 拦一次，去「系统设置 → 隐私与安全性」点「仍要打开」。
 
-会话、环境、指令页无需安装 Hook。审批功能已移除；以前安装过 Muster Hook 的用户，请按[旧 Hook 清理说明](docs/remove-legacy-hook.md)移除遗留配置。Muster 不会自动修改现有 Claude 权限规则。
+会话、清理、规则页无需安装 Hook。审批功能已移除；以前安装过 Muster Hook 的用户，请按[旧 Hook 清理说明](docs/remove-legacy-hook.md)移除遗留配置。Muster 不会自动修改现有 Claude 权限规则。
 
 ---
 
 ## 工作原理
 
 - 会话：每 15 秒读取本机进程和 Claude transcript 的头尾元数据，不保存对话正文。
-- 环境：基于进程和工作树信息生成清理计划，确认后执行。
-- 指令与配置：写入目标文件前保留备份，数据存于 `~/Library/Application Support/Muster/`。
+- 清理：基于进程和工作树信息生成清理计划，确认后执行。
+- 规则与配置：写入目标文件前保留备份，数据存于 `~/Library/Application Support/Muster/`。
 - 应用不运行审批 socket、不拦截 Agent 工具调用，也不请求审批通知权限。
 
 ---
@@ -81,7 +81,7 @@ swift run Muster                   # 开发时直接跑，不用打包
 
 ```
 Sources/
-  MusterCore/       纯逻辑：会话扫描、清理计划、指令同步、配置读写
+  MusterCore/       纯逻辑：会话扫描、清理计划、规则同步、配置读写
   Muster/           SwiftUI app（菜单栏 + 面板 + 设置），仅 UI 与装配
 Tests/              单元测试（逻辑层为主，UI 很少）
 Resources/          Info.plist、AppIcon.icns（打包用）
@@ -101,9 +101,9 @@ python3 Scripts/make-icon.py   # 从蝠鲼动效重新生成 AppIcon.icns（需�
 **发版**：版本号以 git tag 为准，`package.sh` 用 `git describe --tags --abbrev=0` 读它，显式传参可覆盖。
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.4.0 && git push origin v0.4.0
 Scripts/package.sh --dmg
-gh release create v0.2.0 dist/Muster-0.2.0.dmg --title "Muster 0.2.0"
+gh release create v0.4.0 dist/Muster-0.4.0.dmg --title "Muster 0.4.0"
 ```
 
 release 里的 DMG 必须叫 `*.dmg`，app 的检查更新会挑第一个匹配的 asset。

@@ -3,7 +3,7 @@ import Combine
 import MusterCore
 
 @MainActor
-final class SettingsCoordinator {
+final class SettingsCoordinator: ObservableObject {
     static let shared = SettingsCoordinator()
 
     /// Set by the status-item controller so settings/notifications can reveal the panel.
@@ -23,63 +23,41 @@ final class SettingsCoordinator {
             .sink { [weak self] enabled in self?.hotKey?.setEnabled(enabled) }
     }
 
+    /// 更新状态直接显示在设置页里，不再弹模态窗（模态窗会让面板失焦收起）。
+    enum UpdateState: Equatable {
+        case idle, checking, upToDate
+        case available(version: String, page: URL, asset: URL?)
+        case installing
+        case failed(String)
+    }
+
+    @Published private(set) var updateState: UpdateState = .idle
+
     func checkForUpdates() {
+        guard updateState != .checking, updateState != .installing else { return }
+        updateState = .checking
         Task { @MainActor in
             do {
-                if let release = try await UpdateChecker.latest() {
-                    if AppVersion.isNewer(release.version, than: store.appVersion) {
-                        if let asset = release.assetURL {
-                            confirmInstall(release, asset: asset)
-                        } else {
-                            alert(
-                                title: L10n.t("Check for Updates…"),
-                                message: L10n.t("Version %@ is available.", release.version),
-                                open: release.url
-                            )
-                        }
-                    } else {
-                        alert(title: L10n.t("Check for Updates…"), message: L10n.t("Muster is up to date."))
-                    }
-                } else {
-                    alert(
-                        title: L10n.t("Check for Updates…"),
-                        message: L10n.t("Could not check for updates: %@", "no public release information"),
-                        open: releasesURL
-                    )
+                guard let release = try await UpdateChecker.latest() else {
+                    updateState = .failed(L10n.t("Could not check for updates: %@", "no public release information"))
+                    return
                 }
+                updateState = AppVersion.isNewer(release.version, than: store.appVersion)
+                    ? .available(version: release.version, page: release.url, asset: release.assetURL)
+                    : .upToDate
             } catch {
-                alert(
-                    title: L10n.t("Check for Updates…"),
-                    message: L10n.t("Could not check for updates: %@", error.localizedDescription),
-                    open: releasesURL
-                )
+                updateState = .failed(L10n.t("Could not check for updates: %@", error.localizedDescription))
             }
         }
     }
 
-    private var releasesURL: URL {
-        URL(string: "https://github.com/EthanWFL/muster/releases")!
-    }
+    var releasesURL: URL { URL(string: "https://github.com/EthanWFL/muster/releases")! }
 
-    /// release 带 DMG 时可以直接装；没带就退回去发布页手动下。
-    private func confirmInstall(_ release: UpdateRelease, asset: URL) {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = L10n.t("Check for Updates…")
-        alert.informativeText = L10n.t("Version %@ is available.", release.version)
-        alert.addButton(withTitle: L10n.t("Download and Install"))
-        alert.addButton(withTitle: L10n.t("Open Releases"))
-        alert.addButton(withTitle: L10n.t("Cancel"))
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: install(asset)
-        case .alertSecondButtonReturn: NSWorkspace.shared.open(release.url)
-        default: break
-        }
-    }
-
-    /// 下载 → 挂载 → 换包 → 重启。下载和换包都不在主线程，界面只是短暂没反馈。
+    /// 下载 → 挂载 → 换包 → 重启。下载和换包都不在主线程。
     // shortcut: 没有进度条和断点续传，DMG 大了会显得卡住；真嫌慢再加进度。
-    private func install(_ asset: URL) {
+    func install(_ asset: URL) {
+        guard updateState != .installing else { return }
+        updateState = .installing
         let appURL = Bundle.main.bundleURL
         Task {
             do {
@@ -95,29 +73,8 @@ final class SettingsCoordinator {
                 UpdateInstaller.relaunch(appURL)
                 NSApp.terminate(nil)
             } catch {
-                alert(
-                    title: L10n.t("Check for Updates…"),
-                    message: L10n.t("Could not install the update: %@", error.localizedDescription),
-                    open: releasesURL
-                )
+                updateState = .failed(L10n.t("Could not install the update: %@", error.localizedDescription))
             }
-        }
-    }
-
-    private func alert(title: String, message: String, open url: URL? = nil) {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        if let url {
-            alert.addButton(withTitle: L10n.t("Open Releases"))
-            alert.addButton(withTitle: L10n.t("OK"))
-            if alert.runModal() == .alertFirstButtonReturn {
-                NSWorkspace.shared.open(url)
-            }
-        } else {
-            alert.addButton(withTitle: L10n.t("OK"))
-            alert.runModal()
         }
     }
 }
