@@ -160,8 +160,6 @@
 "Provider" = "Provider";
 "Model ID" = "Model ID";
 "Local models" = "Local models";
-"Choose a local model or enter an ID. Existing provider credentials are reused." = "Choose a local model or enter an ID. Existing provider credentials are reused.";
-"Review changes" = "Review changes";
 "A private backup is saved before writing." = "A private backup is saved before writing.";
 "Restore previous" = "Restore previous";
 "These are user-level startup defaults. Project settings, profiles and launch options may override them." = "These are user-level startup defaults. Project settings, profiles and launch options may override them.";
@@ -210,3 +208,7 @@
 "Checking…" = "Checking…";
 "Downloading and installing…" = "Downloading and installing…";
 "Cleanup" = "Cleanup";
+"Default model" = "Default model";
+"Model" = "Model";
+"Custom…" = "Custom…";
+"%@ · Modified %@" = "%@ · Modified %@";

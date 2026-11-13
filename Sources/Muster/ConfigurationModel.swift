@@ -9,9 +9,11 @@ final class ConfigurationModel: ObservableObject {
     @Published private(set) var snapshot: ConfigurationSnapshot?
     @Published private(set) var choices: [ConfigurationModelChoice] = []
     @Published private(set) var canRestore = false
-    @Published var provider = "" { didSet { previewing = false } }
-    @Published var model = "" { didSet { previewing = false } }
-    @Published var previewing = false
+    @Published var provider = ""
+    @Published var model = ""
+    /// 本地模型列表之外手填；列表只有一项或没有时视图自己退回手填
+    @Published var customEntry = false
+    @Published private(set) var fileInfo: String?
     @Published var confirmingRestore = false
     @Published var confirmingReload = false
     @Published private(set) var errorMessage: String?
@@ -41,9 +43,10 @@ final class ConfigurationModel: ObservableObject {
         snapshot = nil
         choices = []
         canRestore = false
-        previewing = false
+        customEntry = false
         errorMessage = nil
         notice = nil
+        fileInfo = selected.flatMap { Self.describe($0.path) }
         guard let selected, selected.editable else { return }
         do {
             let loaded = try store.load(selected)
@@ -55,18 +58,9 @@ final class ConfigurationModel: ObservableObject {
         } catch { show(error) }
     }
 
-    func preview() {
-        guard let snapshot else { return }
-        do {
-            _ = try store.proposed(snapshot, provider: provider, model: model)
-            errorMessage = nil
-            notice = nil
-            previewing = true
-        } catch { show(error) }
-    }
-
+    /// 变更在页内实时以 diff 展示；`store.save` 自己会先校验再写
     func save() {
-        guard previewing, let snapshot else { return }
+        guard let snapshot else { return }
         do {
             try store.save(snapshot, provider: provider, model: model)
             reload()
@@ -95,8 +89,16 @@ final class ConfigurationModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selected.path)])
     }
 
+    private static func describe(_ path: String) -> String? {
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: resolved),
+              let size = attributes[.size] as? Int64 ?? (attributes[.size] as? Int).map(Int64.init),
+              let date = attributes[.modificationDate] as? Date else { return nil }
+        return L10n.t("%@ · Modified %@", ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
+                      date.formatted(date: .abbreviated, time: .shortened))
+    }
+
     private func show(_ error: Error) {
-        previewing = false
         errorMessage = L10n.t(error.localizedDescription)
     }
 }

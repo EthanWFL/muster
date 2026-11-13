@@ -161,8 +161,6 @@
 "Provider" = "服务商";
 "Model ID" = "模型 ID";
 "Local models" = "本地模型";
-"Choose a local model or enter an ID. Existing provider credentials are reused." = "选择本地模型或输入模型 ID，沿用已有服务商认证配置。";
-"Review changes" = "预览变更";
 "A private backup is saved before writing." = "写入前自动保存一份仅当前用户可读的备份。";
 "Restore previous" = "恢复上次配置";
 "These are user-level startup defaults. Project settings, profiles and launch options may override them." = "修改用户级启动默认值；项目配置、Profile 和启动参数可能覆盖这些设置。";
@@ -211,3 +209,7 @@
 "Checking…" = "正在检查…";
 "Downloading and installing…" = "正在下载并安装…";
 "Cleanup" = "清理";
+"Default model" = "默认模型";
+"Model" = "模型";
+"Custom…" = "自定义…";
+"%@ · Modified %@" = "%@ · 修改于 %@";

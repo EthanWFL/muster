@@ -33,16 +33,16 @@ macOS 菜单栏上的 agent 控制台。一个面板里把本机 agent 会话、
 面板里每套规则是一行可折叠的条目：点开即切换为该套并展开正文，名字可以直接在行内改（失焦保存），页脚有 `Markdown · ⌘S` 提示，`⌘S` 保存正文，新建的套在列表底部。
 
 **配置（Configuration）**
-只展示本机已有配置文件的 Agent。Codex、Pi 可编辑用户级默认服务商和模型 ID，支持从本地模型列表选择或手动输入；Claude Code、Hermes、Cursor、Warp、Magpie 提供打开配置文件和 Finder 定位入口。Codex、Pi、Claude Code、Hermes 的配置目录分别遵循 `CODEX_HOME`、`PI_CODING_AGENT_DIR`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`。
+只展示本机已有配置文件的 Agent。页面顶部是配置文件卡片：路径、大小、修改时间，以及打开文件和 Finder 定位入口。Codex、Pi 可编辑用户级默认服务商和模型 ID：有本地模型列表时用下拉选，手填收在下拉底部的「自定义…」里，没有列表时直接是两个输入框；Claude Code、Hermes、Cursor、Warp、Magpie 只提供打开文件入口。Codex、Pi、Claude Code、Hermes 的配置目录分别遵循 `CODEX_HOME`、`PI_CODING_AGENT_DIR`、`CLAUDE_CONFIG_DIR`、`HERMES_HOME`。
 
-先预览字段变更再保存，只替换目标字段，保留其他内容、格式和注释。写入前在 `~/Library/Application Support/Muster/configuration-backups/` 保存一份私有备份；仅当前文件仍与上次写入一致时允许恢复。检测到文件被其他程序修改会停止保存，需重新读取。符号链接保留，写入其目标文件。
+改动会在页内实时以 diff 展示（键名取文件里的真实键），点一次保存即可；只替换目标字段，保留其他内容、格式和注释。底栏有「放弃修改」和「恢复上次配置」。写入前在 `~/Library/Application Support/Muster/configuration-backups/` 保存一份私有备份；仅当前文件仍与上次写入一致时允许恢复。检测到文件被其他程序修改会停止保存，需重新读取。符号链接保留，写入其目标文件。
 
 第一版不编辑认证信息、不查询远端模型，也不热切换正在运行的会话。项目配置、Profile 和启动参数仍可能覆盖用户级默认值。Codex 顶层多行 TOML 值暂不支持表单编辑，遇到此类写法请使用原文件入口；表内内容保持原样。
 
 **设置**
-全局热键 `⌃⌥A`、开机启动、语言、tab 顺序、检查更新（发现新版本可以直接下载 DMG、就地换包并重启）。
+设置分四块：通用（开机启动、全局热键 `⌃⌥A`）、通知（会话停下提醒、飞书机器人 webhook 和测试）、界面（语言、tab 顺序）、关于（版本、检查更新）。检查更新的结果直接显示在设置页里，不弹模态窗；发现新版本可以直接下载 DMG、就地换包并重启。
 
-中英文两套文案，跟随系统语言。
+中英文两套文案，跟随系统语言，也可在设置里指定。
 
 ---
 
@@ -70,7 +70,8 @@ swift run Muster                   # 开发时直接跑，不用打包
 
 ## 工作原理
 
-- 会话：每 15 秒读取本机进程和 Claude transcript 的头尾元数据，不保存对话正文。
+- 会话：每 15 秒读取本机进程和 Claude Code、Codex、Pi 的 transcript 头尾元数据，不保存对话正文。
+- 受保护目录：会话落在文档、桌面、下载、iCloud 云盘或外接卷里时，跳过 git 分支读取和 worktree 扫描，避免首次打开被系统授权弹窗打断；这些目录里的项目不显示分支，也不会被清理页扫描。
 - 清理：基于进程和工作树信息生成清理计划，确认后执行。
 - 规则与配置：写入目标文件前保留备份，数据存于 `~/Library/Application Support/Muster/`。
 - 应用不运行审批 socket、不拦截 Agent 工具调用，也不请求审批通知权限。
@@ -101,9 +102,9 @@ python3 Scripts/make-icon.py   # 从蝠鲼动效重新生成 AppIcon.icns（需�
 **发版**：版本号以 git tag 为准，`package.sh` 用 `git describe --tags --abbrev=0` 读它，显式传参可覆盖。
 
 ```bash
-git tag v0.4.0 && git push origin v0.4.0
+git tag v0.4.1 && git push origin v0.4.1
 Scripts/package.sh --dmg
-gh release create v0.4.0 dist/Muster-0.4.0.dmg --title "Muster 0.4.0"
+gh release create v0.4.1 dist/Muster-0.4.1.dmg --title "Muster 0.4.1"
 ```
 
 release 里的 DMG 必须叫 `*.dmg`，app 的检查更新会挑第一个匹配的 asset。
@@ -114,4 +115,7 @@ release 里的 DMG 必须叫 `*.dmg`，app 的检查更新会挑第一个匹配�
 
 - 无 Developer ID、无公证：别人首次打开要手动放行；换包更新是重新 ad-hoc 签名，登录项和系统权限可能要求重新授权。
 - 更新下载没有进度条（网络慢时会看起来像卡住）。
+- 只有 Claude Code、Codex、Pi 有 transcript 扫描，能区分运行与空闲、能复制 resume 命令；其余四个 agent 状态恒为运行。
+- Codex 的本地模型下拉只在服务商为 openai 时读取缓存目录，使用自定义目录（`model_catalog_json`）的配置暂时要手填。
+- 飞书 webhook 明文存在偏好设置里，且不支持机器人的「签名校验」。
 - 仓库暂未声明许可证。
