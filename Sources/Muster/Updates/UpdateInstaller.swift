@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
+import MusterCore
 
 /// 用 release 上的 DMG 就地换掉当前 app，再重启。
-/// 走最小路径：挂载 → ditto 到 app 同目录的临时名 → 换名 → 删旧包；
-/// 任何一步失败都把旧包换回原位，app 继续能用。
+/// 校验发布签名后挂载，检查候选 app，再换名替换；失败时尝试恢复旧包。
 enum UpdateInstaller {
     enum Failure: LocalizedError {
         case noAppInImage
@@ -20,10 +20,13 @@ enum UpdateInstaller {
     }
 
     /// 换包要在主线程外跑：挂载和拷贝都是阻塞的。
-    static func install(dmgURL: URL, replacing appURL: URL) throws {
+    static func install(dmgURL: URL, signature: Data, publicKey: String?, version: String,
+                        currentVersion: String, replacing appURL: URL) throws {
+        // Verify the publisher before asking the OS to mount any downloaded image.
+        try UpdateTrust.verify(image: dmgURL, signature: signature, publicKey: publicKey)
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("MusterUpdate-\(UUID().uuidString)")
-        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? fm.removeItem(at: work) }
 
         let mount = work.appendingPathComponent("mnt")
@@ -31,8 +34,9 @@ enum UpdateInstaller {
         try run(["/usr/bin/hdiutil", "attach", "-nobrowse", "-readonly", "-quiet", "-mountpoint", mount.path, dmgURL.path])
         defer { try? run(["/usr/bin/hdiutil", "detach", "-quiet", mount.path]) }
 
-        guard let mountedApp = try fm.contentsOfDirectory(at: mount, includingPropertiesForKeys: nil)
-            .first(where: { $0.pathExtension == "app" }) else {
+        let mountedApp = mount.appendingPathComponent("Muster.app")
+        guard fm.fileExists(atPath: mountedApp.path),
+              (try mountedApp.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink != true else {
             throw Failure.noAppInImage
         }
 
@@ -40,17 +44,32 @@ enum UpdateInstaller {
         let parent = appURL.deletingLastPathComponent()
         let incoming = parent.appendingPathComponent(".Muster-\(UUID().uuidString).new")
         let outgoing = parent.appendingPathComponent(".Muster-\(UUID().uuidString).old")
-        try? fm.removeItem(at: incoming)
+        defer { try? fm.removeItem(at: incoming) }
         try run(["/usr/bin/ditto", mountedApp.path, incoming.path])
-        try run(["/usr/bin/codesign", "--verify", "--strict", incoming.path])
+        try run(["/usr/bin/codesign", "--verify", "--deep", "--strict", incoming.path])
+        let infoData = try Data(contentsOf: incoming.appendingPathComponent("Contents/Info.plist"))
+        guard let info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any] else {
+            throw UpdateTrustError.wrongApplication
+        }
+        try UpdateTrust.validateBundle(info: info, expectedVersion: version, currentVersion: currentVersion)
+        #if arch(arm64)
+        let architecture = "arm64"
+        #else
+        let architecture = "x86_64"
+        #endif
+        try run(["/usr/bin/lipo", incoming.appendingPathComponent("Contents/MacOS/Muster").path, "-verify_arch", architecture])
 
         do {
             try fm.moveItem(at: appURL, to: outgoing)
             do {
                 try fm.moveItem(at: incoming, to: appURL)
             } catch {
-                try? fm.moveItem(at: outgoing, to: appURL)
-                throw Failure.replaceFailed(error.localizedDescription)
+                let replacementError = error
+                do { try fm.moveItem(at: outgoing, to: appURL) }
+                catch {
+                    throw Failure.replaceFailed("\(replacementError.localizedDescription)\nRestore failed; the previous app is at \(outgoing.path)")
+                }
+                throw Failure.replaceFailed(replacementError.localizedDescription)
             }
         } catch let failure as Failure {
             try? fm.removeItem(at: incoming)
@@ -71,18 +90,9 @@ enum UpdateInstaller {
     }
 
     private static func run(_ args: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: args[0])
-        process.arguments = Array(args.dropFirst())
-        let errPipe = Pipe()
-        process.standardError = errPipe
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let text = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw Failure.command("\(URL(fileURLWithPath: args[0]).lastPathComponent) failed: \(text)")
+        let result = try CleanupCommandRunner().run(args, cwd: nil)
+        guard result.status == 0 else {
+            throw Failure.command("\(URL(fileURLWithPath: args[0]).lastPathComponent) failed: \(result.stderr)")
         }
     }
 }

@@ -14,7 +14,7 @@ struct PillButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 11.5, weight: .medium))
             .padding(.horizontal, 8)
-            .frame(height: 24)
+            .frame(height: T.controlHeight)
             .foregroundStyle(foreground)
             .background(Capsule().fill(fill))
             .overlay {
@@ -50,7 +50,7 @@ struct PillButtonStyle: ButtonStyle {
     }
 }
 
-/// 纯图标按钮：统一 20pt 点击区和图标字号；悬停提示同时作为无障碍标签。
+/// 图标按钮随布局密度调整点击区；悬停提示同时作为无障碍标签。
 struct IconButton: View {
     let symbol: String
     let label: String
@@ -62,7 +62,7 @@ struct IconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 11))
                 .foregroundStyle(tint)
-                .frame(width: 20, height: 20)
+                .frame(width: T.iconHitSize, height: T.iconHitSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(InteractivePlainButtonStyle())
@@ -113,6 +113,7 @@ struct MiniField: View {
 struct SegmentedControl<Value: Hashable>: View {
     let items: [Value]
     @Binding var selection: Value
+    var shortcut: ((Value) -> KeyEquivalent?)? = nil
     let label: (Value) -> String
 
     var body: some View {
@@ -123,7 +124,7 @@ struct SegmentedControl<Value: Hashable>: View {
                     Text(label(item))
                     .font(.system(size: 11.5, weight: on ? .semibold : .regular))
                     .foregroundStyle(on ? T.fg : T.ctlFg)
-                    .frame(maxWidth: .infinity, minHeight: 24)
+                    .frame(maxWidth: .infinity, minHeight: T.controlHeight)
                     .background {
                         if on {
                             RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
@@ -136,6 +137,8 @@ struct SegmentedControl<Value: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(InteractivePlainButtonStyle())
+                .modifier(OptionalShortcut(key: shortcut?(item)))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(2)
@@ -153,37 +156,24 @@ struct SegmentedTabs: View {
         SegmentedControl(
             items: tabs,
             selection: $selection,
+            shortcut: { tab in tabs.firstIndex(of: tab).map { KeyEquivalent(Character(String($0 + 1))) } },
             label: \.title)
     }
 }
 
-// MARK: - 自绘开关
+// MARK: - 开关
 
-/// 26×15 轨道 + 13pt 白色圆滑块的开关；打开时轨道用近黑/近白。
+/// Native switch preserves keyboard focus and accessibility semantics.
 struct MiniSwitch: View {
     @Binding var isOn: Bool
     var label: String = ""
 
     var body: some View {
-        Capsule()
-            .fill(isOn ? T.fg : T.segTrack)
-            .frame(width: 26, height: 15)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(.white)
-                    .frame(width: 13, height: 13)
-                    .padding(1)
-                    .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
-            }
-            .animation(.snappy(duration: 0.16), value: isOn)
-            .contentShape(Rectangle())
-            .onTapGesture { isOn.toggle() }
-            .pointerCursor()
-            .accessibilityElement()
+        Toggle(label, isOn: $isOn)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .labelsHidden()
             .accessibilityLabel(label)
-            .accessibilityValue(isOn ? L10n.t("On") : L10n.t("Off"))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { isOn.toggle() }
     }
 }
 
@@ -220,7 +210,7 @@ struct SettingsRow<Content: View>: View {
                 }
             }
             Spacer(minLength: T.s3)
-            content
+            content.accessibilityLabel(label)
         }
         .padding(.horizontal, T.s3)
         .frame(minHeight: hint == nil ? T.rowSingle : T.rowDouble)
@@ -302,138 +292,45 @@ struct AgentLogo: View {
 
 // MARK: - 下拉选择
 
-/// 面板内的下拉：点开后在按钮下方就地展开一列选项，白卡片 + 发丝线 + 勾选，跟着 token 走。
-/// 不用系统 `Menu`——它在 popover 里是原生灰白面板，和我们这套语言不一致。
-struct InlineSelect<Item: Hashable, Footer: View>: View {
+/// Keep the compact label, while AppKit owns menu focus, scrolling and keyboard navigation.
+struct InlineSelect<Item: Hashable>: View {
     let items: [Item]
     let label: (Item) -> String
-    var header: String?
-    var width: CGFloat = 168
-    var maxListHeight: CGFloat? = nil
-    /// 展开方向：`.leading` 让列表从按钮左边缘往右展开（面板左侧的入口用），
-    /// `.trailing` 让列表右对齐（设置页右侧的入口用）
-    var alignment: HorizontalAlignment = .trailing
+    var header: String? = nil
     @Binding var selection: Item
-    @ViewBuilder var footer: () -> Footer
-
-    private static var rowHeight: CGFloat { 24 }
-
-    @State private var open = false
-    @State private var closeTask: Task<Void, Never>?
+    var customAction: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: alignment, spacing: T.s1) {
-            Button {
-                withAnimation(.snappy(duration: 0.16)) { open.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Text(label(selection)).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .rotationEffect(.degrees(open ? 180 : 0))
-                }
-                .foregroundStyle(open ? T.fg : T.ctlFg)
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(Capsule().fill(T.pill))
-                .overlay(Capsule().strokeBorder(open ? T.line : .clear, lineWidth: 0.5))
-            }
-            .buttonStyle(InteractivePlainButtonStyle())
-            // 浮层挂在按钮下方，不占布局：卡片高度不变，选项盖在内容之上
-            .overlay(alignment: alignment == .leading ? .topLeading : .topTrailing) {
-                if open {
-                    list
-                        .offset(y: 24 + T.s1)
-                        .transition(.opacity)
-                }
-            }
-        }
-        .zIndex(open ? 10 : 0)
-        // 指针离开按钮或浮层后收起；两者之间移动会被 0.35s 的缓冲接住
-        .onHover(perform: trackHover)
-    }
-
-    private func trackHover(_ inside: Bool) {
-        closeTask?.cancel()
-        guard !inside, open else { return }
-        closeTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            if !Task.isCancelled { withAnimation(.snappy(duration: 0.16)) { open = false } }
-        }
-    }
-
-    private var list: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let header {
-                Text(header)
-                    .font(T.micro)
-                    .foregroundStyle(T.muted)
-                    .padding(.horizontal, T.s2 + T.s1)
-                    .padding(.top, T.s1)
-                    .padding(.bottom, T.s1)
-                Hairline()
-            }
-            if let maxListHeight {
-                ScrollView { options }
-                    .frame(height: min(maxListHeight, CGFloat(items.count) * Self.rowHeight))
-            } else {
-                options
-            }
-            footer()
-        }
-        .padding(.vertical, T.s1)
-        .frame(width: width)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.card))
-        .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
-            .strokeBorder(T.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-        .onHover(perform: trackHover)
-    }
-
-    private var options: some View {
-        VStack(spacing: 0) {
+        Menu {
+            if let header { Text(header) }
             ForEach(items, id: \.self) { item in
-                let on = item == selection
-                Button {
-                    selection = item
-                    withAnimation(.snappy(duration: 0.16)) { open = false }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark")
-                            .font(T.glyph)
-                            .foregroundStyle(T.accent)
-                            .opacity(on ? 1 : 0)
-                            .frame(width: 10)
+                Button { selection = item } label: {
+                    if item == selection {
+                        Label(label(item), systemImage: "checkmark")
+                    } else {
                         Text(label(item))
-                            .font(T.body)
-                            .foregroundStyle(on ? T.fg : T.fg2)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, T.s1)
-                    .frame(height: Self.rowHeight)
-                    .background {
-                        if on {
-                            RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.accentSoft)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .hoverHighlight()
                 }
-                .buttonStyle(InteractivePlainButtonStyle())
-                .padding(.horizontal, T.s1)
             }
+            if let customAction {
+                Divider()
+                Button(L10n.t("Custom…"), action: customAction)
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(label(selection)).font(T.seg).lineLimit(1)
+                Image(systemName: "chevron.down").font(T.glyph)
+            }
+            .foregroundStyle(T.ctlFg)
+            .padding(.horizontal, 9)
+            .frame(height: T.controlHeight)
+            .background(Capsule().fill(T.pill))
         }
-    }
-}
-
-extension InlineSelect where Footer == EmptyView {
-    init(items: [Item], label: @escaping (Item) -> String, header: String? = nil,
-         width: CGFloat = 168, alignment: HorizontalAlignment = .trailing,
-         selection: Binding<Item>) {
-        self.init(items: items, label: label, header: header, width: width,
-                  alignment: alignment, selection: selection, footer: { EmptyView() })
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel(header ?? label(selection))
+        .accessibilityValue(label(selection))
     }
 }
 

@@ -22,8 +22,15 @@ final class InstructionsModel: ObservableObject {
     @Published var setName = ""
     @Published var confirmingDelete = false
 
-    private let sync = InstructionSync()
+    private let sync: InstructionSync
+    private let detectTargets: () -> [InstructionTarget]
     private var saveTask: Task<Void, Never>?
+
+    init(sync: InstructionSync = InstructionSync(),
+         detectTargets: @escaping () -> [InstructionTarget] = { InstructionTargets.detect() }) {
+        self.sync = sync
+        self.detectTargets = detectTargets
+    }
 
     var isDirty: Bool { draft != savedText }
     var sets: [InstructionSet] { state.allSets }
@@ -45,7 +52,7 @@ final class InstructionsModel: ObservableObject {
         guard !hasLoaded else { return }
         hasLoaded = true
         // 只列本机确实装了的：没有指令文件的 agent 不给开关
-        targets = InstructionTargets.detect().filter(\.installed)
+        targets = detectTargets().filter(\.installed)
         state = sync.state()
         activeSetID = state.resolvedActiveSet
         savedText = sync.text(activeSetID)
@@ -55,7 +62,7 @@ final class InstructionsModel: ObservableObject {
 
     // MARK: 多套指令
 
-    /// 切换当前那套。切完把新套写进已开启的 agent——换套就是这个意思。
+    /// 只切换编辑中的草稿。查看规则不修改任何 Agent 文件。
     func selectSet(_ id: String) {
         guard id != activeSetID, state.setNamed(id) != nil else { return }
         flushPendingSave()
@@ -65,10 +72,7 @@ final class InstructionsModel: ObservableObject {
         savedText = sync.text(id)
         draft = savedText
         refreshPlans()
-        let written = applyToEnabled()
-        notice = written > 0
-            ? L10n.t("Switched to %@, wrote %d agents", activeSetName, written)
-            : L10n.t("Switched to %@", activeSetName)
+        notice = L10n.t("Viewing %@ · agent files unchanged", activeSetName)
     }
 
     func createSet() {
@@ -88,7 +92,7 @@ final class InstructionsModel: ObservableObject {
             refreshPlans()
             notice = L10n.t("Created %@", name)
         } catch {
-            errorMessage = L10n.t("Could not save: %@", error.localizedDescription)
+            errorMessage = L10n.t("Could not save: %@", L10n.t(error.localizedDescription))
         }
     }
 
@@ -120,7 +124,7 @@ final class InstructionsModel: ObservableObject {
             refreshPlans()
             notice = L10n.t("Deleted %@", removed)
         } catch {
-            errorMessage = L10n.t("Could not delete %@: %@", removed, error.localizedDescription)
+            errorMessage = L10n.t("Could not delete %@: %@", removed, L10n.t(error.localizedDescription))
         }
     }
 
@@ -134,7 +138,7 @@ final class InstructionsModel: ObservableObject {
             savedText = draft
             refreshPlans()
         } catch {
-            errorMessage = L10n.t("Could not save: %@", error.localizedDescription)
+            errorMessage = L10n.t("Could not save: %@", L10n.t(error.localizedDescription))
         }
     }
 
@@ -157,55 +161,51 @@ final class InstructionsModel: ObservableObject {
 
     func toggle(_ target: InstructionTarget, on: Bool) {
         state.enabled[target.id] = on
-        do {
-            let plan = on
-                ? sync.plan(for: target, sharedText: draft, state: state)
-                : sync.planRemoval(for: target)
-            let done = try sync.apply(plan)
-            if on, done.action == .create || done.action == .update {
-                state.writtenHash[target.id] = InstructionBlock.hash(done.newBlock)
-            }
-            if !on { state.writtenHash[target.id] = nil }
-            persistState()
-            notice = describe(done)
-            refreshPlans()
-        } catch {
-            errorMessage = L10n.t("Could not write %@: %@", target.name, error.localizedDescription)
-            refreshPlans()
-        }
+        persistState()
+        refreshPlans()
+        expanded.insert(target.id)
+        notice = L10n.t("Review the preview, then apply changes.")
     }
 
     func write(_ target: InstructionTarget) {
+        guard !isDirty, let plan = plans[target.id] else { return }
         do {
-            let plan = sync.plan(for: target, sharedText: draft, state: state)
             let done = try sync.apply(plan)
             if done.action == .create || done.action == .update {
                 state.writtenHash[target.id] = InstructionBlock.hash(done.newBlock)
             }
+            if done.action == .remove { state.writtenHash[target.id] = nil }
             persistState()
+            errorMessage = nil
             notice = describe(done)
             refreshPlans()
         } catch {
-            errorMessage = L10n.t("Could not write %@: %@", target.name, error.localizedDescription)
+            errorMessage = L10n.t("Could not write %@: %@", target.name, L10n.t(error.localizedDescription))
+            refreshPlans()
         }
     }
 
     func writeAll() {
-        let written = applyToEnabled()
+        guard !isDirty else { return }
+        let written = applyPending()
         if written == 0, errorMessage == nil { notice = L10n.t("Nothing to write") }
     }
 
-    /// 写入所有已开启、且有变化的 agent；部分失败会点名，已写成功的保留。
+    /// 应用预览中的写入或移除；部分失败会点名，已写成功的保留。
     @discardableResult
-    private func applyToEnabled() -> Int {
+    private func applyPending() -> Int {
         var written = 0
         var failed: [String] = []
-        for target in targets where enabled(target.id) && isPending(target.id) {
+        for target in targets where isPending(target.id) {
             do {
-                let plan = sync.plan(for: target, sharedText: draft, state: state)
+                guard let plan = plans[target.id] else { continue }
                 let done = try sync.apply(plan)
                 if done.action == .create || done.action == .update {
                     state.writtenHash[target.id] = InstructionBlock.hash(done.newBlock)
+                    written += 1
+                }
+                if done.action == .remove {
+                    state.writtenHash[target.id] = nil
                     written += 1
                 }
             } catch {
@@ -243,7 +243,7 @@ final class InstructionsModel: ObservableObject {
             notice = L10n.t("Restored %@", target.name)
             refreshPlans()
         } catch {
-            errorMessage = L10n.t("Could not restore %@: %@", target.name, error.localizedDescription)
+            errorMessage = L10n.t("Could not restore %@: %@", target.name, L10n.t(error.localizedDescription))
         }
     }
 
@@ -264,14 +264,16 @@ final class InstructionsModel: ObservableObject {
     private func refreshPlans() {
         var next: [String: InstructionPlan] = [:]
         for target in targets {
-            next[target.id] = sync.plan(for: target, sharedText: draft, state: state)
+            next[target.id] = enabled(target.id)
+                ? sync.plan(for: target, sharedText: draft, state: state)
+                : sync.planRemoval(for: target)
         }
         plans = next
     }
 
     private func persistState() {
         do { try sync.save(state) } catch {
-            errorMessage = L10n.t("Could not save: %@", error.localizedDescription)
+            errorMessage = L10n.t("Could not save: %@", L10n.t(error.localizedDescription))
         }
     }
 

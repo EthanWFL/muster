@@ -82,6 +82,12 @@ public final class CleanupExecutor: @unchecked Sendable {
                 stillWaiting.append(target)
             } else {
                 report.freedPorts.append(contentsOf: target.ports)
+                let id = CleanupItem(action: .terminate(target), title: "").id
+                for index in report.entries.indices where report.entries[index].itemID == id {
+                    let entry = report.entries[index]
+                    report.entries[index] = CleanupEntry(itemID: entry.itemID, title: entry.title,
+                        commandText: entry.commandText, outcome: .exited)
+                }
             }
         }
         report.awaitingExit = stillWaiting
@@ -89,6 +95,14 @@ public final class CleanupExecutor: @unchecked Sendable {
     }
 
     // MARK: - SIGKILL（独立的、需要显式调用的升级动作）
+
+    public func canForceKill(_ target: ProcessTarget) -> Bool {
+        lock.lock()
+        let sentAt = termSentAt[target.identity]
+        lock.unlock()
+        guard let sentAt, clock.now().timeIntervalSince(sentAt) >= Self.killGracePeriod else { return false }
+        return isSameProcessAlive(target.identity)
+    }
 
     /// 只有此前由本执行器发过 SIGTERM、已过 10 秒且进程仍是同一个时才会发 SIGKILL。
     /// `userConfirmed` 必须是用户针对 SIGKILL 的单独点击，不能复用 SIGTERM 的确认。

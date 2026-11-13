@@ -17,20 +17,40 @@ final class EnvironmentModel: ObservableObject {
     @Published private(set) var confirmed: Set<String> = []
     @Published private(set) var isBusy = false
     @Published private(set) var report: CleanupReport?
+    @Published private(set) var isScanning = false
+    @Published private(set) var forceKillReady: Set<ProcessIdentity> = []
+    private(set) var scanTask: Task<Void, Never>?
+    private(set) var reconcileTask: Task<Void, Never>?
+    private(set) var executionTask: Task<Void, Never>?
+    private var rescanRequested = false
 
     /// 由 `PanelModel` 注入，避免两边各存一份会话
     var sessionsProvider: @MainActor () -> [Session] = { [] }
 
-    private let runner = CleanupCommandRunner()
-    private let detector = OrphanDetector()
+    private let runner: CommandRunner
+    private let table: ProcessTable
+    private let clock: Clock
+    private let detector: OrphanDetector
     private let planner = CleanupPlanner()
     private let executor: CleanupExecutor
     private var timer: Timer?
 
     static let samplingInterval: TimeInterval = 10
 
-    init() {
-        executor = CleanupExecutor(runner: runner, log: DiagnosticsCleanupLog())
+    init(runner: CommandRunner = CleanupCommandRunner(), table: ProcessTable = LibprocProcessTable(),
+         detector: OrphanDetector = OrphanDetector(), clock: Clock = SystemClock(), executor: CleanupExecutor? = nil) {
+        self.runner = runner
+        self.table = table
+        self.detector = detector
+        self.clock = clock
+        self.executor = executor ?? CleanupExecutor(table: table, runner: runner, clock: clock, log: DiagnosticsCleanupLog())
+    }
+
+    func stop() {
+        timer?.invalidate()
+        scanTask?.cancel()
+        reconcileTask?.cancel()
+        rescanRequested = false
     }
 
     // MARK: - 采样
@@ -44,43 +64,54 @@ final class EnvironmentModel: ObservableObject {
     }
 
     /// 页面出现 / 消失时由视图通知；出现时立即做一次完整扫描
-    func setVisible(_ visible: Bool) {
-        isVisible = visible
-        if visible { scan() }
+    func setVisible(_ visible: Bool, owner: UUID) {
+        let wasVisible = isVisible
+        if visible { visibleOwners.insert(owner) } else { visibleOwners.remove(owner) }
+        if isVisible && !wasVisible { scan() }
     }
 
-    private var isVisible = false
+    private var visibleOwners: Set<UUID> = []
+    var isVisible: Bool { !visibleOwners.isEmpty }
 
     private func tick() {
         if isVisible { scan() } else { sampleOnly() }
     }
 
-    /// 只喂孤儿检测器：一次 libproc 快照，不跑 lsof / git。没有存活会话时不采样。
-    private func sampleOnly() {
-        guard !isBusy else { return }
-        let sessions = sessionsProvider()
-        guard sessions.contains(where: { $0.state != .ended }) else { return }
-        let (runner, detector) = (self.runner, self.detector)
-        Task.detached(priority: .background) {
-            detector.observe(snapshot: ProcessScanner(runner: runner).snapshot(), sessions: sessions)
-        }
-    }
+    /// Keep sampling tracked children even after the last parent session exits.
+    func sampleOnly() { startScan(full: false) }
 
-    func scan() {
+    func scan() { startScan(full: true) }
+
+    private func startScan(full: Bool) {
         guard !isBusy else { return }
+        guard !isScanning else {
+            if full { rescanRequested = true }
+            return
+        }
         let sessions = sessionsProvider()
-        let (runner, detector, planner) = (self.runner, self.detector, self.planner)
-        Task.detached(priority: .utility) { [weak self] in
-            let scanner = ProcessScanner(runner: runner)
-            let snapshot = scanner.snapshot()
-            let ports = (try? scanner.listeningPorts()) ?? []
-            detector.observe(snapshot: snapshot, sessions: sessions)
-            let projects = Array(Set(sessions.filter { $0.state != .ended }.map(\.cwd).filter { !$0.isEmpty }))
-            let worktrees = WorktreeScanner(runner: runner).scanAll(projects: projects)
-            let plan = planner.plan(
-                sessions: sessions, snapshot: snapshot, ports: ports,
-                orphans: detector.candidates(), worktrees: worktrees)
-            await self?.apply(plan)
+        guard full || detector.needsSampling(sessions: sessions) else { return }
+        isScanning = true
+        let (runner, table, clock, detector, planner) = (runner, table, clock, detector, planner)
+        scanTask = Task { [weak self] in
+            let plan = await Task.detached(priority: .utility) { () -> CleanupPlan? in
+                let scanner = ProcessScanner(table: table, runner: runner, clock: clock)
+                let snapshot = scanner.snapshot()
+                detector.observe(snapshot: snapshot, sessions: sessions)
+                guard full else { return nil }
+                let ports = (try? scanner.listeningPorts()) ?? []
+                let projects = Array(Set(sessions.filter { $0.state != .ended }.map(\.cwd).filter { !$0.isEmpty }))
+                let worktrees = WorktreeScanner(runner: runner).scanAll(projects: projects)
+                return planner.plan(sessions: sessions, snapshot: snapshot, ports: ports,
+                                    orphans: detector.candidates(), worktrees: worktrees)
+            }.value
+            guard let self else { return }
+            isScanning = false
+            guard !Task.isCancelled else { return }
+            if let plan { apply(plan) }
+            if rescanRequested {
+                rescanRequested = false
+                scan()
+            }
         }
     }
 
@@ -101,7 +132,7 @@ final class EnvironmentModel: ObservableObject {
     var items: [CleanupItem] { plan?.items ?? [] }
     var selectedItems: [CleanupItem] { items.filter { selected.contains($0.id) } }
     var unconfirmedCount: Int { selectedItems.filter { $0.needsExplicitConfirmation && !confirmed.contains($0.id) }.count }
-    var canExecute: Bool { !selectedItems.isEmpty && unconfirmedCount == 0 && !isBusy }
+    var canExecute: Bool { !selectedItems.isEmpty && unconfirmedCount == 0 && !isBusy && !isScanning && report?.awaitingExit.isEmpty != false }
 
     /// R7：显示给用户的命令，就是将要执行的这批 item 的命令
     var commandTexts: [String] { selectedItems.map { $0.command.displayText } }
@@ -128,9 +159,11 @@ final class EnvironmentModel: ObservableObject {
         let request = CleanupRequest(selected: selected, confirmed: confirmed)
         let sessions = sessionsProvider()
         let executor = self.executor
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let report = executor.execute(plan: plan, request: request, sessions: sessions)
-            await self?.finish(report)
+        executionTask = Task { [weak self] in
+            let report = await Task.detached(priority: .userInitiated) {
+                executor.execute(plan: plan, request: request, sessions: sessions)
+            }.value
+            self?.finish(report)
         }
     }
 
@@ -139,8 +172,61 @@ final class EnvironmentModel: ObservableObject {
         isBusy = false
         // 已处理的项会在下次扫描后消失；被拒绝的项保留，让用户看到原因
         selected.subtract(report.entries.filter { $0.outcome == .done || $0.outcome == .termSent }.map(\.itemID))
+        startReconciliation()
         scan()
     }
 
-    func dismissReport() { report = nil }
+    /// Update the report until process identity checks confirm exit, including while hidden.
+    private func startReconciliation() {
+        reconcileTask?.cancel()
+        let executor = executor
+        reconcileTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let current = self?.report, !current.awaitingExit.isEmpty else { return }
+                let (updated, ready) = await Task.detached(priority: .utility) {
+                    var updated = current
+                    executor.reconcile(&updated)
+                    let ready = Set(updated.awaitingExit.filter { executor.canForceKill($0) }.map(\.identity))
+                    return (updated, ready)
+                }.value
+                guard !Task.isCancelled else { return }
+                self?.report = updated
+                self?.forceKillReady = ready
+                if updated.awaitingExit.isEmpty {
+                    self?.scan()
+                    return
+                }
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+            }
+        }
+    }
+
+    /// Called only after the UI's separate force-quit confirmation.
+    func forceKill(_ target: ProcessTarget) {
+        guard !isBusy, forceKillReady.contains(target.identity),
+              report?.awaitingExit.contains(where: { $0.identity == target.identity }) == true else { return }
+        isBusy = true
+        reconcileTask?.cancel()
+        forceKillReady.remove(target.identity)
+        let executor = executor
+        executionTask = Task { [weak self] in
+            let outcome = await Task.detached(priority: .userInitiated) {
+                executor.forceKill(target, userConfirmed: true)
+            }.value
+            guard let self else { return }
+            let id = CleanupItem(action: .terminate(target), title: "").id
+            if let index = report?.entries.firstIndex(where: { $0.itemID == id }), let old = report?.entries[index] {
+                report?.entries[index] = CleanupEntry(itemID: old.itemID, title: old.title,
+                    commandText: "kill -KILL \(target.identity.pid)", outcome: outcome == .done ? .killSent : outcome)
+            }
+            isBusy = false
+            startReconciliation()
+        }
+    }
+
+    func dismissReport() {
+        guard report?.awaitingExit.isEmpty != false else { return }
+        report = nil
+        forceKillReady = []
+    }
 }

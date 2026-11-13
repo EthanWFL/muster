@@ -58,6 +58,11 @@ public final class OrphanDetector: @unchecked Sendable {
         return tracks.count
     }
 
+    /// A parent exiting is precisely when its tracked children still need observation.
+    public func needsSampling(sessions: [Session]) -> Bool {
+        trackedCount > 0 || sessions.contains { $0.pid != nil && $0.state != .ended }
+    }
+
     /// 喂入一次快照：登记 session 树内的进程，更新已登记进程的采样。
     public func observe(snapshot: ProcessSnapshot, sessions: [Session]) {
         lock.lock(); defer { lock.unlock() }

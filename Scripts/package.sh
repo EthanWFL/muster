@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/Muster.app with an ad-hoc signature. No Developer ID is required for local use.
+# Builds dist/Muster.app; local builds use an ad-hoc signature by default.
 # Usage: Scripts/package.sh [--dmg] [version]
 set -euo pipefail
 
@@ -16,6 +16,25 @@ for arg in "$@"; do
         *) VERSION="$arg" ;;
     esac
 done
+
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Version must have the form X.Y.Z" >&2
+    exit 1
+fi
+UPDATE_PUBLIC_KEY="${MUSTER_UPDATE_PUBLIC_KEY:-}"
+UPDATE_KEY_FILE="${MUSTER_UPDATE_KEY_FILE:-}"
+SIGNING_IDENTITY="${MUSTER_SIGNING_IDENTITY:--}"
+if [[ -n "$UPDATE_KEY_FILE" ]]; then
+    DERIVED_KEY="$(swift Scripts/sign-update.swift public-key "$UPDATE_KEY_FILE")"
+    if [[ -n "$UPDATE_PUBLIC_KEY" && "$UPDATE_PUBLIC_KEY" != "$DERIVED_KEY" ]]; then
+        echo "Update signing key does not match MUSTER_UPDATE_PUBLIC_KEY" >&2
+        exit 1
+    fi
+    UPDATE_PUBLIC_KEY="$DERIVED_KEY"
+fi
+if [[ -n "$UPDATE_PUBLIC_KEY" ]]; then
+    swift Scripts/sign-update.swift check-key "$UPDATE_PUBLIC_KEY"
+fi
 
 APP="dist/Muster.app"
 CONTENTS="$APP/Contents"
@@ -43,17 +62,31 @@ if [[ -f Resources/AppIcon.icns ]]; then
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$CONTENTS/Info.plist"
 fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
+if [[ -n "$UPDATE_PUBLIC_KEY" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :MusterUpdatePublicKey string $UPDATE_PUBLIC_KEY" "$CONTENTS/Info.plist"
+fi
 chmod +x "$CONTENTS/MacOS/Muster"
 
-# Sign the app for local use.
-codesign --force --sign - "$APP"
+# Developer ID is optional; credentials and notarization are managed outside this script.
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+    codesign --force --sign - "$APP"
+else
+    codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
+fi
 codesign --verify --strict "$APP"
 
-echo "Built $APP (version $VERSION, ad-hoc signed)"
+echo "Built $APP (version $VERSION)"
 
 if [[ "$MAKE_DMG" == "1" ]]; then
-    rm -f "dist/Muster-$VERSION.dmg"
+    rm -f "dist/Muster-$VERSION.dmg" "dist/Muster-$VERSION.dmg.sig"
     # Redirect: hdiutil spawns a helper that can inherit the caller's stdout and keep a pipe open.
     hdiutil create -quiet -volname "Muster" -srcfolder "$APP" -ov -format UDZO "dist/Muster-$VERSION.dmg" >/dev/null 2>&1
     echo "Built dist/Muster-$VERSION.dmg"
+    if [[ -n "$UPDATE_KEY_FILE" ]]; then
+        swift Scripts/sign-update.swift sign "dist/Muster-$VERSION.dmg" "$UPDATE_KEY_FILE" "$UPDATE_PUBLIC_KEY" "dist/Muster-$VERSION.dmg.sig"
+        swift Scripts/sign-update.swift verify "dist/Muster-$VERSION.dmg" "dist/Muster-$VERSION.dmg.sig" "$UPDATE_PUBLIC_KEY"
+        echo "Verified dist/Muster-$VERSION.dmg.sig"
+    else
+        echo "No update signing key supplied; this DMG supports manual installation only."
+    fi
 fi

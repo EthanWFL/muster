@@ -1,10 +1,15 @@
 import Foundation
+import MusterCore
 
-struct UpdateRelease {
+struct UpdateAsset: Equatable, Sendable {
+    let url: URL
+    let signatureURL: URL
+}
+
+struct UpdateRelease: Equatable, Sendable {
     let version: String
     let url: URL
-    /// release 里附的 DMG；没有就只能打开发布页，装不了
-    let assetURL: URL?
+    let asset: UpdateAsset?
 }
 
 enum UpdateCheckError: LocalizedError {
@@ -24,30 +29,48 @@ enum UpdateChecker {
         guard let endpoint = URL(string: "https://api.github.com/repos/\(owner)/\(repo)/releases/latest") else {
             return nil
         }
-        var request = URLRequest(url: endpoint)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Muster", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw UpdateCheckError.http(-1) }
-        // A private repo or a repo without releases looks like 404 to an unauthenticated client.
-        if http.statusCode == 404 { return nil }
-        guard (200..<300).contains(http.statusCode) else { throw UpdateCheckError.http(http.statusCode) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MusterRelease-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("release.json")
+        do { try await UpdateDownloader.download(endpoint, to: file, limit: 1_024 * 1_024) }
+        catch UpdateCheckError.download(404) { return nil }
+        catch UpdateCheckError.download(let code) { throw UpdateCheckError.http(code) }
+        return try parse(Data(contentsOf: file), owner: owner, repo: repo)
+    }
+
+    static func parse(_ data: Data, owner: String = "EthanWFL", repo: String = "muster") throws -> UpdateRelease? {
         struct Release: Decodable {
             struct Asset: Decodable {
                 let name: String
                 let browser_download_url: String
+                let size: Int64
             }
             let tag_name: String
             let html_url: String
             let assets: [Asset]?
         }
         let release = try JSONDecoder().decode(Release.self, from: data)
-        guard let url = URL(string: release.html_url) else { return nil }
-        let asset = release.assets?.first { $0.name.hasSuffix(".dmg") }
-        return UpdateRelease(
-            version: release.tag_name,
-            url: url,
-            assetURL: asset.flatMap { URL(string: $0.browser_download_url) }
-        )
+        func githubURL(_ raw: String, path: String) -> URL? {
+            guard let url = URL(string: raw), url.scheme == "https", url.host?.lowercased() == "github.com",
+                  url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil,
+                  url.path == path else { return nil }
+            return url
+        }
+        let tag = release.tag_name
+        guard AppVersion(tag) != nil, !tag.contains("/"),
+              let page = githubURL(release.html_url, path: "/\(owner)/\(repo)/releases/tag/\(tag)") else { return nil }
+        let version = tag.hasPrefix("v") || tag.hasPrefix("V") ? String(tag.dropFirst()) : tag
+        let name = "Muster-\(version).dmg"
+        let prefix = "/\(owner)/\(repo)/releases/download/\(tag)/"
+        var asset: UpdateAsset?
+        if let image = release.assets?.first(where: { $0.name == name }),
+           let signature = release.assets?.first(where: { $0.name == name + ".sig" }),
+           image.size > 0, image.size <= UpdateTrust.maximumImageBytes, signature.size > 0, signature.size <= 512,
+           let imageURL = githubURL(image.browser_download_url, path: prefix + name),
+           let signatureURL = githubURL(signature.browser_download_url, path: prefix + name + ".sig") {
+            asset = UpdateAsset(url: imageURL, signatureURL: signatureURL)
+        }
+        return UpdateRelease(version: tag, url: page, asset: asset)
     }
 }

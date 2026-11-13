@@ -43,7 +43,7 @@ import Testing
         #expect(session.agent == .claude)
         #expect(URL(fileURLWithPath: session.cwd).resolvingSymlinksInPath().path
             == URL(fileURLWithPath: tree.root).resolvingSymlinksInPath().path)
-        #expect(session.state == .running)
+        #expect(session.state == .unknown)
         #expect(abs(session.startedAt.timeIntervalSinceNow) < 60)
     }
 }

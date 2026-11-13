@@ -18,7 +18,47 @@ final class ConfigurationModel: ObservableObject {
     @Published var confirmingReload = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var notice: String?
-    private let store = AgentConfigurationStore()
+    @Published private(set) var presets: [ConfigurationPreset] = []
+    @Published var presetName = ""
+    private let store: AgentConfigurationStore
+    private let presetStore: ConfigurationPresetStore
+    private let detectTargets: () -> [AgentConfiguration]
+
+    init(store: AgentConfigurationStore = AgentConfigurationStore(),
+         presetStore: ConfigurationPresetStore = ConfigurationPresetStore(),
+         detectTargets: @escaping () -> [AgentConfiguration] = { AgentConfiguration.detect() }) {
+        self.store = store
+        self.presetStore = presetStore
+        self.detectTargets = detectTargets
+    }
+
+    func savePreset() {
+        guard let selected, selected.editable else { return }
+        do {
+            try presetStore.save(ConfigurationPreset(name: presetName.trimmingCharacters(in: .whitespacesAndNewlines),
+                agentID: selected.id, provider: provider, model: model))
+            presetName = ""
+            try loadPresets()
+            notice = L10n.t("Preset saved. Agent configuration is unchanged.")
+            errorMessage = nil
+        } catch { show(error) }
+    }
+
+    func usePreset(_ preset: ConfigurationPreset) {
+        guard !dirty, snapshot != nil, selected?.id == preset.agentID else { return }
+        provider = preset.provider
+        model = preset.model
+        customEntry = !choices.contains(currentChoice)
+        notice = L10n.t("Preset loaded into the form. Review the diff, then save.")
+    }
+
+    func removePreset(_ preset: ConfigurationPreset) {
+        do { try presetStore.remove(preset.id); try loadPresets() } catch { show(error) }
+    }
+
+    private func loadPresets() throws {
+        presets = try presetStore.load().filter { $0.agentID == selected?.id }.sorted { $0.name < $1.name }
+    }
 
     var currentChoice: ConfigurationModelChoice { .init(provider: provider, model: model) }
     var availableChoices: [ConfigurationModelChoice] {
@@ -29,7 +69,7 @@ final class ConfigurationModel: ObservableObject {
 
     func loadIfNeeded() {
         guard selected == nil else { return }
-        targets = AgentConfiguration.detect()
+        targets = detectTargets()
         if let first = targets.first { select(first) }
     }
 
@@ -46,6 +86,8 @@ final class ConfigurationModel: ObservableObject {
         customEntry = false
         errorMessage = nil
         notice = nil
+        presets = []
+        do { try loadPresets() } catch { show(error) }
         fileInfo = selected.flatMap { Self.describe($0.path) }
         guard let selected, selected.editable else { return }
         do {

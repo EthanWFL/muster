@@ -16,6 +16,7 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         .testTarget(name: "MusterCoreTests", dependencies: ["MusterCore"]),
+        .testTarget(name: "MusterTests", dependencies: ["Muster", "MusterCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

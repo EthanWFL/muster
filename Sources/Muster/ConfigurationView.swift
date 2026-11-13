@@ -13,6 +13,7 @@ struct ConfigurationView: View {
                 if selected.editable, let snapshot = model.snapshot {
                     SectionTitle(text: L10n.t("Default model"))
                     modelCard(selected, snapshot)
+                    presetsCard
                     Text(L10n.t("These are user-level startup defaults. Project settings, profiles and launch options may override them."))
                         .font(T.micro).foregroundStyle(T.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -46,10 +47,41 @@ struct ConfigurationView: View {
 
     // MARK: 顶部
 
+    private var presetsCard: some View {
+        VStack(alignment: .leading, spacing: T.s2) {
+            SectionTitle(text: L10n.t("Model presets"), count: model.presets.count)
+            Card {
+                ForEach(model.presets) { preset in
+                    HStack(spacing: T.s2) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(preset.name).font(T.body)
+                            Text(preset.provider + " / " + preset.model).font(T.monoMicro).foregroundStyle(T.muted)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer()
+                        Button(L10n.t("Use preset")) { model.usePreset(preset) }
+                            .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.dirty)
+                        IconButton(symbol: "trash", label: L10n.t("Delete preset"), tint: T.ctlFg) { model.removePreset(preset) }
+                    }
+                    .padding(.horizontal, T.s3).frame(minHeight: T.rowDouble)
+                    Hairline()
+                }
+                HStack(spacing: T.s2) {
+                    TextField(L10n.t("Preset name"), text: $model.presetName)
+                        .textFieldStyle(.roundedBorder).font(T.body)
+                    Button(L10n.t("Save preset")) { model.savePreset() }
+                        .buttonStyle(PillButtonStyle(kind: .secondary))
+                        .disabled(model.presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(T.s3)
+            }
+        }
+    }
+
     private func header(_ selected: AgentConfiguration) -> some View {
         HStack(spacing: T.s2) {
             AgentLogo(agentID: selected.id, mark: selected.id == "pi" ? "π" : String(selected.name.prefix(1)))
-            InlineSelect(items: model.targets, label: { $0.name }, alignment: .leading,
+            InlineSelect(items: model.targets, label: { $0.name },
                          selection: Binding(get: { selected }, set: { model.select($0) }))
                 .disabled(model.dirty)
             Spacer()
@@ -107,11 +139,11 @@ struct ConfigurationView: View {
                 SettingsRow(label: L10n.t("Model")) {
                     InlineSelect(
                         items: model.availableChoices, label: { $0.label },
-                        header: L10n.t("Local models"), width: 300, maxListHeight: 180,
+                        header: L10n.t("Local models"),
                         selection: Binding(
                             get: { model.currentChoice },
                             set: { model.provider = $0.provider; model.model = $0.model }),
-                        footer: { customEntryButton })
+                        customAction: { model.customEntry = true })
                         .frame(maxWidth: 240, alignment: .trailing)
                 }
                 .zIndex(1)   // 下拉是浮层，要压在下面的 diff 和操作栏之上
@@ -144,25 +176,6 @@ struct ConfigurationView: View {
             actionBar
         }
         .zIndex(1)
-    }
-
-    private var customEntryButton: some View {
-        VStack(spacing: 0) {
-            Hairline().padding(.vertical, T.s1)
-            Button { model.customEntry = true } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "pencil").font(T.glyph).foregroundStyle(T.muted).frame(width: 10)
-                    Text(L10n.t("Custom…")).font(T.body).foregroundStyle(T.fg2)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, T.s1)
-                .frame(height: 24)
-                .contentShape(Rectangle())
-                .hoverHighlight()
-            }
-            .buttonStyle(InteractivePlainButtonStyle())
-            .padding(.horizontal, T.s1)
-        }
     }
 
     /// 左：恢复上次；右：放弃 + 保存。和规则页底栏同一套。

@@ -1,0 +1,28 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Test
+        run: Scripts/test.sh --no-parallel
+      - name: Package and verify local app
+        run: Scripts/package.sh
+      - name: Verify update signing tool
+        run: bash Scripts/test-update-signing.sh

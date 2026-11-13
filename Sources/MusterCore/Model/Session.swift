@@ -5,20 +5,13 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
 
     /// 会话列表分组标题上用的名字（品牌名不翻译）
     public var displayName: String {
-        switch self {
-        case .claude: return "Claude Code"
-        case .codex: return "Codex"
-        case .pi: return "Pi"
-        case .dsh: return "DeepSeek Harness"
-        case .gemini: return "Gemini CLI"
-        case .cursor: return "Cursor"
-        case .opencode: return "OpenCode"
-        }
+        AgentRegistry.agent(rawValue)?.name ?? rawValue
     }
 }
 
 public enum SessionState: String, Codable, Sendable {
-    case running, idle, ended
+    /// running/idle describe transcript activity, not task completion.
+    case running, idle, unknown, ended
 }
 
 public struct Session: Identifiable, Equatable, Sendable {
@@ -32,6 +25,9 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var startedAt: Date
     public var lastActivityAt: Date
     public var state: SessionState
+    public var isProcessAlive: Bool
+    public var key: String { agent.rawValue + ":" + id }
+    public var hasTranscript: Bool { !id.hasPrefix("proc-") }
     /// 工作目录当前的 git 分支；由面板在合并后填充
     public var branch: String?
 
@@ -47,6 +43,7 @@ public struct Session: Identifiable, Equatable, Sendable {
         self.startedAt = startedAt
         self.lastActivityAt = lastActivityAt ?? startedAt
         self.state = state
+        self.isProcessAlive = pid != nil
     }
 
     /// 面板里显示的项目目录名
@@ -58,13 +55,8 @@ public struct Session: Identifiable, Equatable, Sendable {
         guard !id.hasPrefix("proc-"), !id.isEmpty,
               id.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
         else { return nil }
-        let command: String
-        switch agent {
-        case .claude: command = "claude --resume \(id)"
-        case .codex: command = "codex resume \(id)"
-        case .pi: command = "pi --session \(id)"
-        default: return nil
-        }
+        guard let arguments = AgentRegistry.agent(agent.rawValue)?.resumeArguments, !arguments.isEmpty else { return nil }
+        let command = (arguments + [id]).joined(separator: " ")
         return cwd.isEmpty ? command : "cd " + Shell.quote(cwd) + " && " + command
     }
 }

@@ -2,19 +2,29 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSPopoverDelegate {
     private let model: PanelModel
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private var resignObserver: NSObjectProtocol?
+    private let surfaceID = UUID()
+    private let surface = PanelSurfaceState()
+    private let management: ManagementWindowController
 
     init(model: PanelModel) {
         self.model = model
+        management = ManagementWindowController(model: model)
         super.init()
+        surface.isVisible = false
 
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentSize = NSSize(width: 420, height: 560)
-        popover.contentViewController = NSHostingController(rootView: PanelView(model: model))
+        popover.contentViewController = NSHostingController(rootView: PanelView(
+            model: model, surfaceID: surfaceID,
+            onOpenWindow: { [weak self] in self?.openManagement() },
+            onOpenSettings: { [weak self] in self?.openSettings() },
+            onClose: { [weak self] in self?.closeIfShown() }, surface: surface))
 
         if let button = statusItem.button {
             button.image = MenuBarIcon.image
@@ -26,8 +36,7 @@ final class StatusItemController: NSObject {
         }
 
         SettingsCoordinator.shared.onOpenPanel = { [weak self] in
-            // 热键总是回主视图，不要停在设置页
-            self?.model.showsSettings = false
+            // The quick panel always shows workspace tabs; keep the window's settings selection.
             self?.showPanel()
         }
 
@@ -45,8 +54,19 @@ final class StatusItemController: NSObject {
     }
 
     private func closeIfShown() {
+        surface.isVisible = false
         guard popover.isShown else { return }
         popover.performClose(nil)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        surface.isVisible = false
+        model.env.setVisible(false, owner: surfaceID)
+    }
+
+    @objc private func openManagement() {
+        closeIfShown()
+        management.open()
     }
 
     @objc private func handleClick() {
@@ -61,6 +81,7 @@ final class StatusItemController: NSObject {
 
     func showPanel() {
         guard let button = statusItem.button else { return }
+        surface.isVisible = true
         if !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
@@ -73,6 +94,7 @@ final class StatusItemController: NSObject {
 
         let menu = NSMenu()
         menu.addItem(item(L10n.t("Open Muster"), #selector(openPanel)))
+        menu.addItem(item(L10n.t("Open management window"), #selector(openManagement)))
         menu.addItem(.separator())
         menu.addItem(item(L10n.t("Settings…"), #selector(openSettings), key: ","))
         menu.addItem(item(L10n.t("Check for Updates…"), #selector(checkForUpdates)))
@@ -100,12 +122,13 @@ final class StatusItemController: NSObject {
 
     @objc private func openPanel() { showPanel() }
     @objc private func openSettings() {
-        showPanel()
-        model.showsSettings = true
+        closeIfShown()
+        management.openSettings()
     }
-    /// 结果显示在设置页里，所以先把面板带到设置页再检查
+    /// Update results belong to the management window's About section.
     @objc private func checkForUpdates() {
-        openSettings()
+        closeIfShown()
+        management.openSettings(.about)
         SettingsCoordinator.shared.checkForUpdates()
     }
     @objc private func quit() { NSApp.terminate(nil) }

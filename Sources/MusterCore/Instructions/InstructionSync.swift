@@ -41,7 +41,7 @@ public struct InstructionSet: Codable, Sendable, Equatable, Identifiable {
 public struct InstructionSyncState: Codable, Sendable, Equatable {
     public var enabled: [String: Bool] = [:]
     public var writtenHash: [String: String] = [:]
-    /// 当前给 agent 用的那套
+    /// 最近浏览的草稿；实际写入状态由每个 Agent 的 writtenHash 表示。
     public var activeSet: String = InstructionSet.defaultID
     /// 除默认以外的套
     public var sets: [InstructionSet] = []
@@ -97,6 +97,8 @@ public struct InstructionPlan: Sendable, Equatable {
     public var resultingFile: String
     /// 写前备份的位置，`apply` 之后才有值
     public var backupPath: String?
+    /// 生成预览时的文件，用于拒绝覆盖预览之后的外部编辑。
+    public var originalFile: String?
 }
 
 /// 写前留下的那份原文件，用来回滚。
@@ -177,7 +179,7 @@ public struct InstructionSync: Sendable {
         func result(_ action: InstructionAction, _ current: String?, _ own: Int, _ next: String) -> InstructionPlan {
             InstructionPlan(
                 target: target, action: action, existingBlock: current, newBlock: newBlock,
-                ownLineCount: own, resultingFile: next, backupPath: nil)
+                ownLineCount: own, resultingFile: next, backupPath: nil, originalFile: file)
         }
 
         guard let file else {
@@ -222,12 +224,12 @@ public struct InstructionSync: Sendable {
             return InstructionPlan(
                 target: target, action: .unchanged, existingBlock: nil, newBlock: "",
                 ownLineCount: file.map(InstructionBlock.ownLineCount) ?? 0,
-                resultingFile: file ?? "", backupPath: nil)
+                resultingFile: file ?? "", backupPath: nil, originalFile: file)
         }
         return InstructionPlan(
             target: target, action: .remove, existingBlock: current, newBlock: "",
             ownLineCount: InstructionBlock.ownLineCount(file),
-            resultingFile: InstructionBlock.withBlock(file, ""), backupPath: nil)
+            resultingFile: InstructionBlock.withBlock(file, ""), backupPath: nil, originalFile: file)
     }
 
     // MARK: 执行
@@ -242,6 +244,10 @@ public struct InstructionSync: Sendable {
             break
         }
         var done = plan
+        guard readFile(plan.target.path) == plan.originalFile,
+              plan.originalFile != nil || !FileManager.default.fileExists(atPath: plan.target.path) else {
+            throw InstructionWriteError.fileChanged
+        }
         if FileManager.default.fileExists(atPath: plan.target.path) {
             done.backupPath = try backup(plan.target)
         } else {
@@ -336,5 +342,12 @@ public struct InstructionSync: Sendable {
     private func readFile(_ path: String) -> String? {
         guard let data = FileManager.default.contents(atPath: path) else { return nil }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+public enum InstructionWriteError: LocalizedError {
+    case fileChanged
+    public var errorDescription: String? {
+        "The file changed after the preview. Review the refreshed preview before applying again."
     }
 }

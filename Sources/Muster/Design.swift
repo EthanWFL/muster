@@ -59,6 +59,9 @@ final class Theme: ObservableObject {
 
 /// 「安静表面」设计语言：一张安静的表面，靠发丝线和底色差分做层级，只有一个强调色。
 enum T {
+    private static var comfortable: Bool {
+        MainActor.assumeIsolated { SettingsStore.shared.comfortableLayout }
+    }
     private static func pick(light: UInt32, dark: UInt32) -> Color {
         Color(hex: MainActor.assumeIsolated { Theme.shared.isDark } ? dark : light)
     }
@@ -95,22 +98,24 @@ enum T {
     static let s4: CGFloat = 16
 
     // 行高：单行 34 / 双行 40–42 / 紧凑行 30
-    static let rowCompact: CGFloat = 30
-    static let rowSingle: CGFloat = 34
-    static let rowDouble: CGFloat = 40
+    static var rowCompact: CGFloat { comfortable ? 34 : 30 }
+    static var rowSingle: CGFloat { comfortable ? 38 : 34 }
+    static var rowDouble: CGFloat { comfortable ? 48 : 40 }
+    static var controlHeight: CGFloat { comfortable ? 28 : 24 }
+    static var iconHitSize: CGFloat { comfortable ? 26 : 22 }
 
     // 圆角
     static let rInner: CGFloat = 5
     static let r: CGFloat = 7
 
     // 字号：只许用这几档，尺寸越多越难对齐
-    static let body = Font.system(size: 12.5)
-    static let small = Font.system(size: 11)
-    static let micro = Font.system(size: 10.5)
-    static let seg = Font.system(size: 11.5)
-    static let section = Font.system(size: 11, weight: .semibold)
-    static let mono = Font.system(size: 11, design: .monospaced)
-    static let monoMicro = Font.system(size: 10.5, design: .monospaced)
+    static var body: Font { .system(size: comfortable ? 14 : 12.5) }
+    static var small: Font { .system(size: comfortable ? 12 : 11) }
+    static var micro: Font { .system(size: comfortable ? 12 : 10.5) }
+    static var seg: Font { .system(size: comfortable ? 12.5 : 11.5) }
+    static var section: Font { .system(size: comfortable ? 12 : 11, weight: .semibold) }
+    static var mono: Font { .system(size: comfortable ? 12 : 11, design: .monospaced) }
+    static var monoMicro: Font { .system(size: comfortable ? 12 : 10.5, design: .monospaced) }
     /// 指示性小图标（chevron、勾选）：最小一档，不再往下开新字号
     static let glyph = Font.system(size: 10, weight: .semibold)
 }

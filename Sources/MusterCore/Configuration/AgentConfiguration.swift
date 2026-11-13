@@ -4,27 +4,19 @@ public struct AgentConfiguration: Identifiable, Equatable, Hashable {
     public let id: String
     public let name: String
     public let path: String
-    public var editable: Bool { id == "codex" || id == "pi" }
-    public var providerKey: String { id == "pi" ? "defaultProvider" : "model_provider" }
-    public var modelKey: String { id == "pi" ? "defaultModel" : "model" }
+    public var editable: Bool { AgentRegistry.agent(id)?.editableConfiguration ?? false }
+    public var providerKey: String { AgentRegistry.agent(id)?.providerKey ?? "model_provider" }
+    public var modelKey: String { AgentRegistry.agent(id)?.modelKey ?? "model" }
 
     public static func detect(home: String = NSHomeDirectory(),
                               environment: [String: String] = ProcessInfo.processInfo.environment,
                               exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> [Self] {
-        func directory(_ key: String, _ fallback: String) -> String {
-            guard let value = environment[key], !value.isEmpty else { return home + fallback }
-            return (value as NSString).expandingTildeInPath
+        AgentRegistry.all.sorted { $0.configurationOrder < $1.configurationOrder }.compactMap { agent in
+            guard let location = agent.configuration else { return nil }
+            let path = location.resolve(home: home, environment: environment)
+            guard exists(path) else { return nil }
+            return Self(id: agent.id, name: agent.name, path: path)
         }
-        let specs: [(String, String, String)] = [
-            ("codex", "Codex", directory("CODEX_HOME", "/.codex") + "/config.toml"),
-            ("pi", "Pi", directory("PI_CODING_AGENT_DIR", "/.pi/agent") + "/settings.json"),
-            ("claude", "Claude Code", directory("CLAUDE_CONFIG_DIR", "/.claude") + "/settings.json"),
-            ("hermes", "Hermes", directory("HERMES_HOME", "/.hermes") + "/config.yaml"),
-            ("cursor", "Cursor", home + "/Library/Application Support/Cursor/User/settings.json"),
-            ("warp", "Warp", home + "/.warp/settings.toml"),
-            ("magpie", "Magpie", home + "/.config/magpie/settings.json")
-        ]
-        return specs.filter { exists($0.2) }.map { Self(id: $0.0, name: $0.1, path: $0.2) }
     }
 }
 
@@ -63,7 +55,7 @@ public struct AgentConfigurationStore {
     public func load(_ target: AgentConfiguration) throws -> ConfigurationSnapshot {
         let path = URL(fileURLWithPath: target.path).resolvingSymlinksInPath().path
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        let fields = try ConfigurationDocument(data: data, json: target.id == "pi",
+        let fields = try ConfigurationDocument(data: data, json: AgentRegistry.agent(target.id)?.jsonConfiguration == true,
                                                keys: [target.providerKey, target.modelKey])
         return ConfigurationSnapshot(target: target, data: data, resolvedPath: path,
             provider: fields.values[target.providerKey] ?? (target.id == "codex" ? "openai" : ""),
@@ -79,7 +71,7 @@ public struct AgentConfigurationStore {
             && value == value.trimmingCharacters(in: .whitespacesAndNewlines)
             && !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })) })
         else { throw ConfigurationError.invalidValue }
-        let document = try ConfigurationDocument(data: snapshot.data, json: snapshot.target.id == "pi", keys: Array(values.keys))
+        let document = try ConfigurationDocument(data: snapshot.data, json: AgentRegistry.agent(snapshot.target.id)?.jsonConfiguration == true, keys: Array(values.keys))
         // Leave an absent default untouched when the user only edits the other field.
         var changes: [String: String] = [:]
         if provider != snapshot.provider { changes[snapshot.target.providerKey] = provider }

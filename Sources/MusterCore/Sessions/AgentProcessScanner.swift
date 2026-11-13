@@ -20,31 +20,13 @@ public struct AgentProcessScanner: Sendable {
                   let record = table.record(for: pid), let cwd = record.cwd else { return nil }
             let started = record.startTime ?? Date()
             return Session(
-                id: "proc-\(pid)", agent: kind, cwd: cwd, pid: pid, pidStartTime: record.startTime,
-                startedAt: started, lastActivityAt: started, state: .running)
+                id: "proc-\(pid)-\(Int(started.timeIntervalSince1970))", agent: kind, cwd: cwd, pid: pid, pidStartTime: record.startTime,
+                startedAt: started, lastActivityAt: started, state: .unknown)
         }
     }
 
     /// 只认可执行名，外加 node 跑脚本时认包路径，避免把 `vim .../claude/…` 当成 agent。
     static func kind(forArgs args: [String]) -> AgentKind? {
-        guard let first = args.first else { return nil }
-        switch (first as NSString).lastPathComponent {
-        case "claude": return .claude
-        case "codex": return .codex
-        case "pi": return .pi
-        case "dsh": return .dsh
-        case "gemini": return .gemini
-        case "cursor-agent": return .cursor
-        case "opencode": return .opencode
-        case "node":
-            let script = args.count > 1 ? args[1] : ""
-            if script.contains("/claude-code/") { return .claude }
-            if script.contains("/@openai/codex/") { return .codex }
-            if script.contains("/pi-coding-agent/") { return .pi }
-            if script.contains("/gemini-cli/") { return .gemini }
-            return nil
-        default:
-            return nil
-        }
+        AgentRegistry.kind(forArgs: args)
     }
 }

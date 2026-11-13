@@ -4,6 +4,8 @@ import SwiftUI
 struct EnvironmentView: View {
     @ObservedObject var model: PanelModel
     @ObservedObject var env: EnvironmentModel
+    let visibilityOwner: UUID
+    @Environment(\.panelSurfaceVisible) private var surfaceVisible
 
     private var listeners: [CleanupItem] { env.items.filter { kind($0) == .listener } }
     private var orphans: [CleanupItem] { env.items.filter { kind($0) == .orphan } }
@@ -28,7 +30,8 @@ struct EnvironmentView: View {
                     .padding(.top, 2)
             }
             if let report = env.report {
-                ReportCard(report: report, dismiss: env.dismissReport)
+                ReportCard(report: report, ready: env.forceKillReady, busy: env.isBusy,
+                           forceKill: env.forceKill, dismiss: env.dismissReport)
                     .padding(.bottom, 4)
             }
             if env.items.isEmpty {
@@ -42,8 +45,9 @@ struct EnvironmentView: View {
                 PlanBox(env: env)
             }
         }
-        .onAppear { env.setVisible(true) }
-        .onDisappear { env.setVisible(false) }
+        .onAppear { env.setVisible(surfaceVisible, owner: visibilityOwner) }
+        .onDisappear { env.setVisible(false, owner: visibilityOwner) }
+        .onChange(of: surfaceVisible) { _, visible in env.setVisible(visible, owner: visibilityOwner) }
     }
 
     @ViewBuilder private func section(_ title: String, _ items: [CleanupItem]) -> some View {
@@ -167,7 +171,11 @@ private struct PlanBox: View {
 
 private struct ReportCard: View {
     let report: CleanupReport
+    let ready: Set<ProcessIdentity>
+    let busy: Bool
+    let forceKill: (ProcessTarget) -> Void
     let dismiss: () -> Void
+    @State private var confirmingForceKill: ProcessTarget?
 
     var body: some View {
         VStack(alignment: .leading, spacing: T.s2) {
@@ -175,6 +183,7 @@ private struct ReportCard: View {
                 Text(L10n.t("Cleanup result")).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(T.fg)
                 Spacer()
                 IconButton(symbol: "xmark", label: L10n.t("Dismiss"), action: dismiss)
+                    .disabled(!report.awaitingExit.isEmpty)
             }
             ForEach(Array(report.entries.enumerated()), id: \.offset) { _, entry in
                 HStack(alignment: .firstTextBaseline, spacing: T.s2) {
@@ -188,6 +197,18 @@ private struct ReportCard: View {
                         .foregroundStyle(outcomeColor(entry.outcome))
                 }
             }
+            ForEach(report.awaitingExit, id: \.identity) { target in
+                HStack {
+                    Text(L10n.t("Waiting for pid %d to exit", Int(target.identity.pid)))
+                        .font(T.small).foregroundStyle(T.muted)
+                    Spacer()
+                    if ready.contains(target.identity) {
+                        Button(L10n.t("Force quit…")) { confirmingForceKill = target }
+                            .buttonStyle(PillButtonStyle(kind: .danger))
+                            .disabled(busy)
+                    }
+                }
+            }
             if let summary = summary { Text(summary).font(T.small).foregroundStyle(T.muted) }
         }
         .padding(T.s3)
@@ -195,12 +216,21 @@ private struct ReportCard: View {
         .overlay(RoundedRectangle(cornerRadius: T.r, style: .continuous)
             .strokeBorder(T.line, lineWidth: 0.5))
         .padding(.horizontal, T.s1)
+        .alert(L10n.t("Force quit this process?"), isPresented: Binding(
+            get: { confirmingForceKill != nil },
+            set: { if !$0 { confirmingForceKill = nil } }
+        ), presenting: confirmingForceKill) { target in
+            Button(L10n.t("Force quit"), role: .destructive) { forceKill(target) }
+            Button(L10n.t("Cancel"), role: .cancel) {}
+        } message: { target in
+            Text(L10n.t("pid %d has not exited. SIGKILL may discard unsaved work.", Int(target.identity.pid)))
+        }
     }
 
     private var summary: String? {
         var parts: [String] = []
         if !report.freedPorts.isEmpty {
-            parts.append(L10n.t("ports signalled: %@", report.freedPorts.map(String.init).joined(separator: ", ")))
+            parts.append(L10n.t("exited processes used ports: %@", report.freedPorts.map(String.init).joined(separator: ", ")))
         }
         if !report.prunedRepositories.isEmpty { parts.append(L10n.t("%d repo pruned", report.prunedRepositories.count)) }
         if !report.removedDirectories.isEmpty { parts.append(L10n.t("%d directory removed", report.removedDirectories.count)) }
@@ -214,6 +244,8 @@ private struct ReportCard: View {
         switch o {
         case .done: return L10n.t("Done")
         case .termSent: return L10n.t("SIGTERM sent")
+        case .killSent: return L10n.t("SIGKILL sent")
+        case .exited: return L10n.t("Process exited")
         case .refused(let r): return L10n.t("Refused: %@", refusalText(r))
         case .failed(let m): return L10n.t("Failed: %@", m)
         }
@@ -221,7 +253,7 @@ private struct ReportCard: View {
 
     private func outcomeColor(_ o: CleanupOutcome) -> Color {
         switch o {
-        case .done, .termSent: return T.muted
+        case .done, .termSent, .killSent, .exited: return T.muted
         case .refused: return T.amber
         case .failed: return T.red
         }

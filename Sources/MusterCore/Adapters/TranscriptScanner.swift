@@ -71,6 +71,7 @@ public struct TranscriptScanner: Sendable {
         let files = fm.enumerator(at: projectsRoot, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
         // shortcut: walks the whole tree each scan, upgrade if Codex's per-day dirs get too many
         while let file = files?.nextObject() as? URL {
+            try Task.checkCancellation()
             guard files?.level == depth, file.pathExtension == "jsonl",
                   let values = try? file.resourceValues(forKeys: Set(keys)),
                   values.isRegularFile == true, let mtime = values.contentModificationDate,

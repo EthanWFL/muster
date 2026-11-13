@@ -4,6 +4,7 @@ import SwiftUI
 /// 「指令」页：写一次，所有开启的 agent 在每次对话前都读到。
 struct InstructionsView: View {
     @ObservedObject var model: InstructionsModel
+    @Environment(\.panelPresentation) private var presentation
     @State private var openSetID: String?
     @State private var editingName = ""
     @FocusState private var nameFocused: Bool
@@ -39,7 +40,7 @@ struct InstructionsView: View {
                         Text("Markdown").font(T.micro).foregroundStyle(T.faint)
                     }
                     Button { model.saveNow() } label: {
-                        ShortcutLabel(title: model.isDirty ? L10n.t("Save") : L10n.t("Saved"), glyph: "⌘S")
+                        ShortcutLabel(title: model.isDirty ? L10n.t("Save draft") : L10n.t("Draft saved"), glyph: "⌘S")
                     }
                         .buttonStyle(PillButtonStyle(kind: model.isDirty ? .primary : .secondary))
                         .disabled(!model.isDirty)
@@ -49,10 +50,17 @@ struct InstructionsView: View {
                 .frame(height: T.rowDouble)
             }
 
+            Text(L10n.t("Saving keeps a local draft. Apply writes the preview; turning a target off previews removal."))
+                .font(T.small).foregroundStyle(T.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, T.s3)
+
             SectionTitle(text: L10n.t("Agents"), count: model.targets.count)
                 .overlay(alignment: .trailing) {
-                    if model.targets.contains(where: { model.enabled($0.id) && model.isPending($0.id) }) {
-                        Button(L10n.t("Write to the enabled agents")) { model.writeAll() }
+                    if model.targets.contains(where: { model.isPending($0.id) }) {
+                        Button(L10n.t("Review changes")) {
+                            model.expanded.formUnion(model.targets.filter { model.isPending($0.id) }.map(\.id))
+                        }
                             .buttonStyle(PillButtonStyle(kind: .primary))
                             .padding(.trailing, T.s3)
                     }
@@ -73,6 +81,18 @@ struct InstructionsView: View {
                 }
             }
 
+            if model.targets.contains(where: { model.isPending($0.id) }) {
+                HStack {
+                    Text(L10n.t("%d agents pending", model.targets.filter { model.isPending($0.id) }.count))
+                        .font(T.small).foregroundStyle(T.muted)
+                    Spacer()
+                    Button(L10n.t("Apply changes")) { model.writeAll() }
+                        .buttonStyle(PillButtonStyle(kind: .primary))
+                        .disabled(model.isDirty)
+                }
+                .padding(.horizontal, T.s3)
+            }
+
             if let notice = model.notice {
                 Text(notice).font(T.micro).foregroundStyle(T.muted).padding(.horizontal, T.s3)
             }
@@ -85,7 +105,7 @@ struct InstructionsView: View {
 
     // MARK: 套
 
-    /// 默认全部收起；展开那套就是当前生效那套
+    /// 默认全部收起；展开仅选择编辑中的草稿。
     private func setSection(_ set: InstructionSet) -> some View {
         let open = openSetID == set.id
         return VStack(spacing: 0) {
@@ -165,7 +185,7 @@ struct InstructionsView: View {
         .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 
-    /// 展开一套会切到那套（换套就是把它的文字写进已开启的 agent）
+    /// 展开只切换草稿，不写入 Agent。
     private func toggle(_ set: InstructionSet) {
         if openSetID == set.id {
             commitRename()
@@ -234,10 +254,12 @@ struct InstructionsView: View {
         .buttonStyle(PillButtonStyle(kind: .quiet))
     }
 
-    /// 内容变多时编辑区长到 180pt，再长就靠 TextEditor 自己滚
+    /// 管理窗口提供更大的编辑区；菜单栏面板保持紧凑。
     private var editorHeight: CGFloat {
         let lines = model.draft.split(separator: "\n", omittingEmptySubsequences: false).count
-        return min(max(160, CGFloat(lines) * 17 + 26), 180)
+        return presentation == .window
+            ? min(max(320, CGFloat(lines) * 19 + 26), 520)
+            : min(max(160, CGFloat(lines) * 17 + 26), 180)
     }
 
     private var createRow: some View {
@@ -289,6 +311,8 @@ private struct AgentRow: View {
     @ObservedObject var model: InstructionsModel
     let target: InstructionTarget
     @State private var previewMode: PreviewMode = .diff
+    @State private var showsFullPreview = false
+    @Environment(\.panelPresentation) private var presentation
 
     private enum PreviewMode: String, CaseIterable, Hashable {
         case diff, full
@@ -332,12 +356,12 @@ private struct AgentRow: View {
                 }
                 .buttonStyle(InteractivePlainButtonStyle())
                 .accessibilityLabel(L10n.t("Show the preview"))
-                MiniSwitch(isOn: Binding(get: { on }, set: { model.toggle(target, on: $0) }))
+                MiniSwitch(isOn: Binding(get: { on }, set: { model.toggle(target, on: $0) }), label: target.name)
                     .disabled(!target.installed)
                     .opacity(target.installed ? 1 : 0.4)
             }
             .padding(.horizontal, T.s3)
-            .frame(height: 42)
+            .frame(minHeight: T.rowDouble + 2)
 
             if expanded { preview }
         }
@@ -356,7 +380,15 @@ private struct AgentRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let plan {
-                CodeBlock(lines: previewMode == .diff ? diffLines(plan) : fullFileLines(plan))
+                let lines = previewMode == .diff ? diffLines(plan) : fullFileLines(plan)
+                let limit = presentation == .window ? 80 : 40
+                CodeBlock(lines: showsFullPreview ? lines : Array(lines.prefix(limit)))
+                if lines.count > limit {
+                    Button(showsFullPreview ? L10n.t("Collapse preview") : L10n.t("Show all %d lines", lines.count)) {
+                        showsFullPreview.toggle()
+                    }
+                    .buttonStyle(PillButtonStyle(kind: .quiet))
+                }
             }
             if let plan {
                 HStack(spacing: T.s2) {
@@ -366,9 +398,9 @@ private struct AgentRow: View {
                     .frame(width: 168)
                     Text(detail(plan)).font(T.micro).foregroundStyle(T.faint).lineLimit(1)
                     Spacer(minLength: T.s2)
-                    Button(L10n.t("Write")) { model.write(target) }
+                    Button(L10n.t("Apply")) { model.write(target) }
                         .buttonStyle(PillButtonStyle(kind: .secondary))
-                        .disabled(!target.installed)
+                        .disabled(!target.installed || !model.isPending(target.id) || model.isDirty)
                 }
             }
             backupRow
@@ -404,14 +436,13 @@ private struct AgentRow: View {
             lines += plan.newBlock.split(separator: "\n", omittingEmptySubsequences: false)
                 .map { DetailLine(kind: .add, text: "+ " + $0) }
         }
-        return Array(lines.prefix(40))
+        return lines
     }
 
     /// 写入后整份文件的样子，用来确认段落在文件里的位置。
     private func fullFileLines(_ plan: InstructionPlan) -> [DetailLine] {
         let text = plan.resultingFile.isEmpty ? plan.newBlock : plan.resultingFile
         return text.split(separator: "\n", omittingEmptySubsequences: false)
-            .prefix(60)
             .map { DetailLine(kind: .plain, text: String($0)) }
     }
 

@@ -1,7 +1,7 @@
 import MusterCore
 import UserNotifications
 
-/// 会话从「在跑」变「停下」时提醒：系统通知，外加可选的飞书自定义机器人。
+/// 已确认进程关联的会话持续没有新活动时提醒，不宣称任务完成。
 /// 只发 agent 名、项目名和分支，不带任何会话内容。
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
@@ -15,10 +15,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func notifyFinished(_ sessions: [Session]) {
+    func notifyQuiet(_ sessions: [Session]) {
         let settings = SettingsStore.shared
         for session in sessions {
-            let text = L10n.t("%@ stopped · %@", session.agent.displayName,
+            let text = L10n.t("%@ has no recent activity · %@", session.agent.displayName,
                               session.projectName + (session.branch.map { " (\($0))" } ?? ""))
             if settings.notificationsEnabled, canNotify {
                 let content = UNMutableNotificationContent()
@@ -26,7 +26,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
                 content.body = text
                 content.sound = .default
                 UNUserNotificationCenter.current().add(
-                    UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
+                    UNNotificationRequest(identifier: session.key, content: content, trigger: nil))
             }
             Task { _ = await Self.sendFeishu("Muster · " + text) }
         }

@@ -34,6 +34,8 @@ public enum CleanupOutcome: Equatable, Sendable {
     case done
     /// SIGTERM 已送达，不代表进程已退出
     case termSent
+    case killSent
+    case exited
     case refused(CleanupRefusal)
     case failed(String)
 }
@@ -43,12 +45,19 @@ public struct CleanupEntry: Equatable, Sendable {
     public let title: String
     public let commandText: String
     public let outcome: CleanupOutcome
+
+    public init(itemID: String, title: String, commandText: String, outcome: CleanupOutcome) {
+        self.itemID = itemID
+        self.title = title
+        self.commandText = commandText
+        self.outcome = outcome
+    }
 }
 
 /// R8：清理后的结果清单。
 public struct CleanupReport: Equatable, Sendable {
     public var entries: [CleanupEntry] = []
-    /// 已发出 SIGTERM 的进程占用的端口。是否真正释放取决于进程是否退出，见 `awaitingExit`
+    /// 已确认退出的进程此前占用的端口；不保证端口没有被其他进程重新占用。
     public var freedPorts: [Int] = []
     public var removedDirectories: [String] = []
     public var prunedRepositories: [String] = []

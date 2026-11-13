@@ -7,23 +7,34 @@ import Foundation
 final class PanelModel: ObservableObject {
     @Published private(set) var sessions: [Session] = []
     @Published private(set) var notice: String?
-    private var liveSessions: [Session] = []
+    @Published private(set) var isRefreshingSessions = false
+    @Published var sessionSearch = ""
+    @Published var sessionFilter: SessionActivityFilter = .all
+    @Published var sessionGrouping: SessionGrouping = SessionGrouping(
+        rawValue: UserDefaults.standard.string(forKey: "MusterSessionGrouping") ?? "") ?? .agent {
+        didSet { UserDefaults.standard.set(sessionGrouping.rawValue, forKey: "MusterSessionGrouping") }
+    }
+    @Published var selectedSessionKey: String?
+    @Published private(set) var searchFocusRequest = 0
+    @Published private(set) var lastSessionRefresh: Date?
+    @Published private(set) var resumingSessionKey: String?
+
+    func focusSessionSearch(showInManagementWindow: Bool = true) {
+        if showInManagementWindow { showsSettings = false }
+        tab = .sessions
+        searchFocusRequest += 1
+    }
+
+    func resetSessionFilters() {
+        sessionSearch = ""
+        sessionFilter = .all
+    }
+    private var scanTask: Task<Void, Never>?
+    private var activityMonitor = SessionActivityMonitor()
     private let sessionStore = SessionStore()
     private let terminalJumper = TerminalJumper()
     private let notifier = NotificationService()
-    private let scanners: [TranscriptScanner] = {
-        let env = ProcessInfo.processInfo.environment
-        func root(_ key: String, _ fallback: String, _ sub: String) -> URL {
-            let base = env[key].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(fallback)
-            return base.appendingPathComponent(sub)
-        }
-        return [
-            TranscriptScanner(agent: .claude, projectsRoot: root("CLAUDE_CONFIG_DIR", ".claude", "projects")),
-            TranscriptScanner(agent: .codex, depth: 4, projectsRoot: root("CODEX_HOME", ".codex", "sessions")),
-            TranscriptScanner(agent: .pi, projectsRoot: root("PI_CODING_AGENT_DIR", ".pi/agent", "sessions")),
-        ]
-    }()
+    private let scanners = AgentRegistry.transcriptScanners()
     private var diskTimer: Timer?
 
     enum Tab: String, CaseIterable {
@@ -53,6 +64,8 @@ final class PanelModel: ObservableObject {
     }
 
     @Published var showsSettings = false
+    @Published var settingsSection: SettingsSection = .general
+    @Published private(set) var settingsScrollRequest = 0
     @Published var tabOrder: [Tab] = PanelModel.storedTabOrder() {
         didSet { UserDefaults.standard.set(tabOrder.map(\.rawValue), forKey: Self.tabOrderKey) }
     }
@@ -78,11 +91,27 @@ final class PanelModel: ObservableObject {
 
     func toggleSettings() { showsSettings.toggle() }
 
+    func showSettings(_ section: SettingsSection) {
+        settingsSection = section
+        showsSettings = true
+        // An anchor can be clicked again after scrolling within the same section.
+        settingsScrollRequest += 1
+    }
+
+    func openRepository() {
+        if let url = URL(string: "https://github.com/EthanWFL/muster") { NSWorkspace.shared.open(url) }
+    }
+
     let env = EnvironmentModel()
     let instructions = InstructionsModel()
     let configuration = ConfigurationModel()
+    let diagnostics = DiagnosticsModel()
+    let library: SessionLibraryModel
+
+    init(library: SessionLibraryModel? = nil) { self.library = library ?? SessionLibraryModel() }
 
     func start() {
+        library.load()
         notifier.start()
         env.sessionsProvider = { [weak self] in self?.sessions ?? [] }
         env.startSampling()
@@ -92,7 +121,12 @@ final class PanelModel: ObservableObject {
         }
     }
 
-    func stop() { diskTimer?.invalidate() }
+    func stop() {
+        diskTimer?.invalidate()
+        scanTask?.cancel()
+        library.cancelImport()
+        env.stop()
+    }
 
     func jumpToTerminal(_ session: Session) {
         let jumper = terminalJumper
@@ -121,43 +155,52 @@ final class PanelModel: ObservableObject {
         notice = L10n.t("Resume command copied · %@", command)
     }
 
-    /// 合并 transcript 和进程扫描，保留会话 ID、较早的开始时间及可用于终端跳转的 PID。
-    private func refresh() {
-        var list = sessionStore.sessions().filter { $0.state != .ended }
-        for live in liveSessions {
-            if let index = list.firstIndex(where: {
-                $0.agent == live.agent
-                    && ($0.pid == live.pid || ($0.pid == nil && $0.cwd == live.cwd))
-            }) {
-                list[index].pid = live.pid
-                list[index].pidStartTime = live.pidStartTime
-                list[index].startedAt = min(list[index].startedAt, live.startedAt)
-            } else if !list.contains(where: { $0.id == live.id }) {
-                list.append(live)
+    func continueSession(_ session: Session) {
+        if session.isProcessAlive { jumpToTerminal(session); return }
+        guard resumingSessionKey == nil, session.resumeCommand != nil else { return }
+        resumingSessionKey = session.key
+        Task {
+            defer { resumingSessionKey = nil }
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try SessionResumer().resume(session) }
+            }.value
+            switch result {
+            case .success: notice = L10n.t("Resume command sent to a new Terminal window.")
+            case .failure(let error):
+                copyResume(session)
+                notice = L10n.t(error.localizedDescription)
             }
         }
-        for index in list.indices { list[index].branch = SessionInsights.branch(cwd: list[index].cwd) }
-        let finished = SessionInsights.finished(from: sessions, to: list)
-        sessions = list
-        if !finished.isEmpty { notifier.notifyFinished(finished) }
     }
 
     func refreshSessions() {
-        Task.detached(priority: .utility) { [weak self] in
-            let found = AgentProcessScanner().scan()
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                liveSessions = found
-                refresh()
-            }
-        }
+        guard !isRefreshingSessions else { return }
+        isRefreshingSessions = true
         let scanners = scanners
         let store = sessionStore
-        Task.detached(priority: .utility) { [weak self] in
-            for scanner in scanners {
-                if let found = try? scanner.scan() { store.mergeDisk(found) }
-            }
-            await self?.refresh()
+        scanTask = Task { [weak self] in
+            let scan = await Task.detached(priority: .utility) {
+                var transcripts: [Session] = []
+                for scanner in scanners {
+                    if let found = try? scanner.scan() { transcripts += found }
+                }
+                let processes = AgentProcessScanner().scan()
+                var list = store.refresh(transcripts: transcripts, processes: processes)
+                    .filter { $0.state != .ended }
+                var branches: [String: String] = [:]
+                for cwd in Set(list.map(\.cwd)) { branches[cwd] = SessionInsights.branch(cwd: cwd) }
+                for index in list.indices { list[index].branch = branches[list[index].cwd] }
+                return (list: list, transcripts: transcripts)
+            }.value
+            guard let self else { return }
+            isRefreshingSessions = false
+            guard !Task.isCancelled else { return }
+            let list = scan.list
+            sessions = list
+            library.observe(transcripts: scan.transcripts, live: list)
+            lastSessionRefresh = Date()
+            let quiet = activityMonitor.newlyQuiet(list, now: Date())
+            if !quiet.isEmpty { notifier.notifyQuiet(quiet) }
         }
     }
 }

@@ -1,30 +1,94 @@
 import AppKit
 import SwiftUI
 
-/// 设置页：并进面板里的一屏（不再是独立窗口）。
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, notifications, interface, diagnostics, about
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .general: return L10n.t("General")
+        case .notifications: return L10n.t("Notifications")
+        case .interface: return L10n.t("Interface")
+        case .diagnostics: return L10n.t("Diagnostics")
+        case .about: return L10n.t("About")
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .general: return "slider.horizontal.3"
+        case .notifications: return "bell"
+        case .interface: return "rectangle.3.group"
+        case .diagnostics: return "waveform.path.ecg"
+        case .about: return "info.circle"
+        }
+    }
+}
+
+/// 设置连续排列；侧栏负责锚点跳转，滚动位置负责同步选中项。
 /// 和主面板同一套语言——灰底、白卡片、发丝线、一个强调色。
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var model: PanelModel
     @ObservedObject private var updates = SettingsCoordinator.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var webhookResult: String?
+    @State private var hasPositionedInitialSection = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: T.s3) {
-                    general
-                    notifications
-                    interface
-                    aboutAndUpdates
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(SettingsSection.allCases) { section in
+                            sectionContent(section)
+                                .padding(.top, 24)
+                                .padding(.bottom, section == .about ? 24 : 0)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                // Leave enough trailing space to align even the last anchor at the top.
+                                .frame(minHeight: section == .about ? viewport.size.height : nil, alignment: .top)
+                                .background(GeometryReader { geometry in
+                                    Color.clear.preference(key: SettingsSectionFrames.self,
+                                        value: [section: geometry.frame(in: .named("settings-scroll"))])
+                                })
+                                .id(section)
+                                .zIndex(section == .interface ? 1 : 0)
+                        }
+                    }
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, T.s3)
-                .padding(.bottom, T.s3)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .coordinateSpace(name: "settings-scroll")
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.visible)
+                .onPreferenceChange(SettingsSectionFrames.self) { frames in
+                    guard frames.count == SettingsSection.allCases.count else { return }
+                    if !hasPositionedInitialSection {
+                        hasPositionedInitialSection = true
+                        proxy.scrollTo(model.settingsSection, anchor: .top)
+                    } else if let visible = SettingsSection.allCases.last(where: { (frames[$0]?.minY ?? .infinity) <= 1 }),
+                              model.settingsSection != visible {
+                        // Updating the highlight must not issue another scroll request.
+                        model.settingsSection = visible
+                    }
+                }
+                .onChange(of: model.settingsScrollRequest) { _, _ in
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(model.settingsSection, anchor: .top)
+                    }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollIndicators(.visible)
-            .padding(.bottom, T.s2)
+        }
+        .clipped()
+    }
+
+    @ViewBuilder private func sectionContent(_ section: SettingsSection) -> some View {
+        switch section {
+        case .general: general
+        case .notifications: notifications
+        case .interface: interface
+        case .diagnostics: DiagnosticsView(model: model.diagnostics)
+        case .about: aboutAndUpdates
         }
     }
 
@@ -64,8 +128,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("Notifications"))
             Card {
-                SettingsRow(label: L10n.t("Notify when a session stops"),
-                            hint: L10n.t("A session with no new transcript lines counts as stopped.")) {
+                SettingsRow(label: L10n.t("Notify after activity pauses"),
+                            hint: L10n.t("Remind after 60 seconds without new activity. This does not mean the task finished.")) {
                     MiniSwitch(isOn: $store.notificationsEnabled)
                 }
                 Hairline()
@@ -105,6 +169,11 @@ struct SettingsView: View {
                             set: { store.language = L10n.Language(rawValue: $0) ?? .system }))
                 }
                 Hairline()
+                SettingsRow(label: L10n.t("Comfortable layout"),
+                            hint: L10n.t("Larger text and roomier rows.")) {
+                    MiniSwitch(isOn: $store.comfortableLayout)
+                }
+                Hairline()
                 VStack(alignment: .leading, spacing: T.s2) {
                     Text(L10n.t("Drag the tabs to reorder them."))
                         .font(T.small)
@@ -116,7 +185,7 @@ struct SettingsView: View {
                 .padding(.vertical, T.s2)
             }
         }
-        .zIndex(1)   // 语言下拉是浮层，这一区要压在后续分区之上
+        .zIndex(1)
     }
 
     /// 版本、更新与源码入口：挤成一行
@@ -131,7 +200,7 @@ struct SettingsView: View {
                     IconButton(symbol: "arrow.triangle.2.circlepath", label: L10n.t("Check for Updates…"), tint: T.ctlFg) {
                         updates.checkForUpdates()
                     }
-                    .disabled(updates.updateState == .checking || updates.updateState == .installing)
+                    .disabled(updates.updateBusy)
                 }
                 .padding(.horizontal, T.s3)
                 .frame(height: T.rowSingle)
@@ -143,23 +212,33 @@ struct SettingsView: View {
         }
     }
 
-    /// 检查结果就地显示：不弹窗，面板不会因为模态窗失焦而收起
+    /// 检查结果直接显示在关于页。
     private var updateStatus: some View {
         HStack(spacing: T.s2) {
-            Text(updateMessage)
-                .font(T.small)
-                .foregroundStyle(updateTone)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: T.s1) {
+                Text(updateMessage)
+                    .font(T.small)
+                    .foregroundStyle(updateTone)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .downloading(let progress) = updates.updateState {
+                    if let fraction = progress.fraction { ProgressView(value: fraction).progressViewStyle(.linear) }
+                    Text(ByteCountFormatter.string(fromByteCount: progress.received, countStyle: .file))
+                        .font(T.micro).foregroundStyle(T.muted)
+                }
+            }
             Spacer(minLength: T.s2)
             switch updates.updateState {
-            case .available(_, let page, let asset):
-                if let asset {
-                    Button(L10n.t("Download and Install")) { updates.install(asset) }
+            case .available(let release):
+                if release.asset != nil && updates.hasTrustedUpdateKey {
+                    Button(L10n.t("Download and Install")) { updates.installAvailableUpdate() }
                         .buttonStyle(PillButtonStyle(kind: .primary))
                 } else {
-                    Button(L10n.t("Open Releases")) { NSWorkspace.shared.open(page) }
+                    Button(L10n.t("Open Releases")) { NSWorkspace.shared.open(release.url) }
                         .buttonStyle(PillButtonStyle(kind: .secondary))
                 }
+            case .downloading:
+                Button(L10n.t("Cancel")) { updates.cancelDownload() }
+                    .buttonStyle(PillButtonStyle(kind: .secondary))
             case .failed:
                 Button(L10n.t("Open Releases")) { NSWorkspace.shared.open(updates.releasesURL) }
                     .buttonStyle(PillButtonStyle(kind: .secondary))
@@ -177,8 +256,12 @@ struct SettingsView: View {
         case .idle: return ""
         case .checking: return L10n.t("Checking…")
         case .upToDate: return L10n.t("Muster is up to date.")
-        case .available(let version, _, _): return L10n.t("Version %@ is available.", version)
-        case .installing: return L10n.t("Downloading and installing…")
+        case .available(let release):
+            let title = L10n.t("Version %@ is available.", release.version)
+            return release.asset != nil && updates.hasTrustedUpdateKey ? title
+                : title + " " + L10n.t("Automatic installation is unavailable. Download from Releases.")
+        case .downloading: return L10n.t("Downloading update…")
+        case .installing: return L10n.t("Verifying and installing…")
         case .failed(let message): return message
         }
     }
@@ -204,6 +287,14 @@ struct SettingsView: View {
             .padding(.vertical, T.s1)
     }
 
+}
+
+private struct SettingsSectionFrames: PreferenceKey {
+    static var defaultValue: [SettingsSection: CGRect] = [:]
+
+    static func reduce(value: inout [SettingsSection: CGRect], nextValue: () -> [SettingsSection: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
 }
 
 /// 标签顺序：一行胶囊，直接拖动换位

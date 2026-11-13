@@ -28,6 +28,10 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(notificationsEnabled, forKey: Self.notificationsKey) }
     }
 
+    @Published var comfortableLayout: Bool {
+        didSet { defaults.set(comfortableLayout, forKey: "MusterComfortableLayout") }
+    }
+
     /// shortcut: 明文放 UserDefaults；webhook 只能发消息不能读，要更稳时再迁到 Keychain
     @Published var feishuWebhook: String {
         didSet { defaults.set(feishuWebhook, forKey: Self.feishuKey) }
@@ -47,6 +51,7 @@ final class SettingsStore: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hotKeyEnabled = defaults.object(forKey: Self.hotKeyKey) as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: Self.notificationsKey) as? Bool ?? true
+        comfortableLayout = defaults.bool(forKey: "MusterComfortableLayout")
         feishuWebhook = defaults.string(forKey: Self.feishuKey) ?? ""
     }
 

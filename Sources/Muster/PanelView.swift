@@ -3,26 +3,57 @@ import SwiftUI
 
 struct PanelView: View {
     @ObservedObject var model: PanelModel
+    var presentation: PanelPresentation = .popover
+    var surfaceID = UUID()
+    var onOpenWindow: (() -> Void)? = nil
+    var onOpenSettings: (() -> Void)? = nil
+    var onClose: (() -> Void)? = nil
+    @ObservedObject var surface = PanelSurfaceState()
+    @ObservedObject private var settings = SettingsStore.shared
     /// 观察外观：深浅色一变，整块 token 重新求值
     @ObservedObject private var theme = Theme.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
+    private var isShowingSettings: Bool { presentation == .window && model.showsSettings }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Hairline()
+            if presentation == .popover {
+                header
+                Hairline()
+                pageAndFooter
+            } else {
+                HStack(spacing: 0) {
+                    ManagementSidebar(model: model)
+                    Hairline(vertical: true)
+                    pageAndFooter
+                }
+            }
+        }
+        .frame(width: presentation == .popover ? 420 : nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.panelPresentation, presentation)
+        .environment(\.panelSurfaceVisible, surface.isVisible)
+        .background(T.bg.ignoresSafeArea())
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onAppear { focused = model.tab != .sessions || isShowingSettings }
+        .onKeyPress(phases: .down, action: handleKey)
+    }
 
+    private var pageAndFooter: some View {
+        VStack(spacing: 0) {
             Group {
-                if model.showsSettings {
-                    SettingsView(store: SettingsStore.shared, model: model)
+                if isShowingSettings {
+                    SettingsView(store: settings, model: model)
                 } else {
                     tabs
                 }
             }
-            .transition(.opacity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: model.showsSettings)
-
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .id(settings.language.rawValue + "-" + String(settings.comfortableLayout))
+            .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: isShowingSettings)
             if let notice = model.notice {
                 Text(notice)
                     .font(T.small).foregroundStyle(T.muted)
@@ -32,16 +63,9 @@ struct PanelView: View {
             Hairline()
             footer
         }
-        .frame(width: 420)
-        .background(T.bg)
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onAppear { focused = true }
-        .onKeyPress(phases: .down, action: handleKey)
     }
 
-    /// 顶部：左边品牌，右边 GitHub 与设置
+    /// 快速面板顶部：品牌、搜索和管理窗口入口。
     private var header: some View {
         HStack(spacing: T.s2) {
             BrandMark()
@@ -49,70 +73,62 @@ struct PanelView: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(T.fg)
             Spacer(minLength: T.s2)
-            iconButton("arrow.up.right.square", help: L10n.t("Open the GitHub repository"), active: false) {
-                if let url = URL(string: "https://github.com/EthanWFL/muster") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-            iconButton(
-                "gearshape", help: L10n.t("Settings"), active: model.showsSettings,
-                shortcut: ",") {
-                model.toggleSettings()
-            }
+            PanelHeaderActions(model: model, presentation: presentation,
+                               onOpenWindow: onOpenWindow, onOpenSettings: onOpenSettings)
         }
         .padding(.horizontal, T.s3)
         .frame(height: 40)
     }
 
-    private func iconButton(
-        _ symbol: String, help: String, active: Bool,
-        shortcut: KeyEquivalent? = nil, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(active ? T.fg : T.ctlFg)
-                .frame(width: 24, height: 24)
-                .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
-                    .fill(active ? T.card2 : .clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(InteractivePlainButtonStyle())
-        .help(help)
-        .accessibilityLabel(help)
-        .modifier(OptionalShortcut(key: shortcut))
-    }
-
     @ViewBuilder private var tabs: some View {
-        SegmentedTabs(selection: $model.tab, tabs: model.orderedTabs)
-            .padding(.horizontal, T.s3)
-            .padding(.top, T.s3)
-            .padding(.bottom, T.s2)
-
-        Hairline()
-
-        ScrollView(.vertical) {
-                Group {
-                    switch model.tab {
-                    case .sessions: SessionsView(model: model)
-                    case .environment: EnvironmentView(model: model, env: model.env)
-                    case .instructions: InstructionsView(model: model.instructions)
-                    case .configuration: ConfigurationView(model: model.configuration)
-                    }
-                }
-                .padding(.horizontal, T.s2)
-                .padding(.bottom, T.s2)
-                .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
+        VStack(spacing: 0) {
+            if presentation == .popover {
+                SegmentedTabs(selection: $model.tab, tabs: model.orderedTabs)
+                    .padding(.horizontal, T.s3)
+                    .padding(.top, T.s3)
+                    .padding(.bottom, T.s2)
+                Hairline()
             }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(.visible)
-        .padding(.bottom, T.s2)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            if model.tab == .sessions {
+                if presentation == .window {
+                    SessionLibraryView(model: model, library: model.library)
+                } else {
+                    SessionsView(model: model, library: model.library, onOpenLibrary: onOpenWindow)
+                }
+            } else {
+                ScrollView(.vertical) {
+                    Group {
+                        switch model.tab {
+                        case .sessions: EmptyView()
+                        case .environment: EnvironmentView(model: model, env: model.env, visibilityOwner: surfaceID)
+                        case .instructions: InstructionsView(model: model.instructions)
+                        case .configuration: ConfigurationView(model: model.configuration)
+                        }
+                    }
+                    .padding(presentation == .window ? T.s4 : T.s2)
+                    .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.visible)
+            }
+        }
     }
 
     private var footer: some View {
         HStack(spacing: 0) {
-            Spacer()
+            if model.isRefreshingSessions {
+                Text(L10n.t("Refreshing sessions…")).font(T.small).foregroundStyle(T.muted)
+            } else if let date = model.lastSessionRefresh {
+                Text(L10n.t("Updated") + " ")
+                    .font(T.small).foregroundStyle(T.muted)
+                Text(date, style: .relative).font(T.small).foregroundStyle(T.muted)
+            }
+            Spacer(minLength: T.s2)
+            if let onClose, presentation == .window {
+                Button(action: onClose) { ShortcutLabel(title: L10n.t("Close"), glyph: "⌘W") }
+                    .buttonStyle(PillButtonStyle(kind: .quiet))
+                    .keyboardShortcut("w")
+            }
             Button { NSApplication.shared.terminate(nil) } label: {
                 ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q")
             }
@@ -124,7 +140,13 @@ struct PanelView: View {
     }
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        if model.showsSettings, press.key == .escape {
+        if press.modifiers == .command, let number = Int(press.characters),
+           model.orderedTabs.indices.contains(number - 1) {
+            if presentation == .window { model.showsSettings = false }
+            model.tab = model.orderedTabs[number - 1]
+            return .handled
+        }
+        if isShowingSettings, press.key == .escape {
             model.showsSettings = false
             return .handled
         }
@@ -132,8 +154,52 @@ struct PanelView: View {
     }
 }
 
+/// Shared by the popover header and the management window's titlebar accessory.
+struct PanelHeaderActions: View {
+    @ObservedObject var model: PanelModel
+    var presentation: PanelPresentation = .popover
+    var onOpenWindow: (() -> Void)? = nil
+    var onOpenSettings: (() -> Void)? = nil
+    @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var theme = Theme.shared
+
+    var body: some View {
+        HStack(spacing: T.s2) {
+            iconButton("magnifyingglass", help: L10n.t("Search sessions · ⌘F"), shortcut: "f") {
+                model.focusSessionSearch(showInManagementWindow: presentation == .window)
+            }
+            if let onOpenWindow {
+                iconButton("arrow.up.left.and.arrow.down.right", help: L10n.t("Open management window"), action: onOpenWindow)
+            }
+            iconButton("arrow.up.right.square", help: L10n.t("Open the GitHub repository")) {
+                model.openRepository()
+            }
+            if let onOpenSettings {
+                iconButton("gearshape", help: L10n.t("Settings…"), shortcut: ",", action: onOpenSettings)
+            }
+        }
+    }
+
+    private func iconButton(
+        _ symbol: String, help: String,
+        shortcut: KeyEquivalent? = nil, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(T.ctlFg)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(InteractivePlainButtonStyle())
+        .help(help)
+        .accessibilityLabel(help)
+        .modifier(OptionalShortcut(key: shortcut))
+    }
+}
+
 /// 只在给了键值时挂 ⌘ 快捷键
-private struct OptionalShortcut: ViewModifier {
+struct OptionalShortcut: ViewModifier {
     let key: KeyEquivalent?
 
     func body(content: Content) -> some View {

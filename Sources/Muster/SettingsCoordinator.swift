@@ -26,15 +26,28 @@ final class SettingsCoordinator: ObservableObject {
     /// 更新状态直接显示在设置页里，不再弹模态窗（模态窗会让面板失焦收起）。
     enum UpdateState: Equatable {
         case idle, checking, upToDate
-        case available(version: String, page: URL, asset: URL?)
+        case available(UpdateRelease)
+        case downloading(UpdateDownloadProgress)
         case installing
         case failed(String)
     }
 
     @Published private(set) var updateState: UpdateState = .idle
+    private var updateTask: Task<Void, Never>?
+    private var downloadID: UUID?
+    private let updateKey = Bundle.main.object(forInfoDictionaryKey: "MusterUpdatePublicKey") as? String
+
+    var updateBusy: Bool {
+        switch updateState {
+        case .checking, .downloading, .installing: return true
+        default: return false
+        }
+    }
+
+    var hasTrustedUpdateKey: Bool { UpdateTrust.hasValidKey(updateKey) }
 
     func checkForUpdates() {
-        guard updateState != .checking, updateState != .installing else { return }
+        guard !updateBusy else { return }
         updateState = .checking
         Task { @MainActor in
             do {
@@ -43,7 +56,7 @@ final class SettingsCoordinator: ObservableObject {
                     return
                 }
                 updateState = AppVersion.isNewer(release.version, than: store.appVersion)
-                    ? .available(version: release.version, page: release.url, asset: release.assetURL)
+                    ? .available(release)
                     : .upToDate
             } catch {
                 updateState = .failed(L10n.t("Could not check for updates: %@", error.localizedDescription))
@@ -53,27 +66,52 @@ final class SettingsCoordinator: ObservableObject {
 
     var releasesURL: URL { URL(string: "https://github.com/EthanWFL/muster/releases")! }
 
-    /// 下载 → 挂载 → 换包 → 重启。下载和换包都不在主线程。
-    // shortcut: 没有进度条和断点续传，DMG 大了会显得卡住；真嫌慢再加进度。
-    func install(_ asset: URL) {
-        guard updateState != .installing else { return }
-        updateState = .installing
+    func cancelDownload() {
+        guard case .downloading = updateState else { return }
+        updateTask?.cancel()
+    }
+
+    /// Download can be cancelled; replacement is a short, non-cancellable transaction.
+    func installAvailableUpdate() {
+        guard case .available(let release) = updateState, let asset = release.asset, hasTrustedUpdateKey else { return }
+        updateState = .downloading(.init(received: 0, expected: nil))
+        let id = UUID()
+        downloadID = id
         let appURL = Bundle.main.bundleURL
-        Task {
+        let currentVersion = store.appVersion
+        let key = updateKey
+        updateTask = Task {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MusterDownload-" + id.uuidString)
+            defer {
+                try? FileManager.default.removeItem(at: directory)
+                downloadID = nil
+                updateTask = nil
+            }
             do {
-                let (downloaded, response) = try await URLSession.shared.download(from: asset)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    throw UpdateCheckError.download((response as? HTTPURLResponse)?.statusCode ?? -1)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                let signatureURL = directory.appendingPathComponent("update.sig")
+                let dmg = directory.appendingPathComponent("update.dmg")
+                try await UpdateDownloader.download(asset.signatureURL, to: signatureURL, limit: 512)
+                try Task.checkCancellation()
+                try await UpdateDownloader.download(asset.url, to: dmg, limit: UpdateTrust.maximumImageBytes) { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self, self.downloadID == id, case .downloading = self.updateState else { return }
+                        self.updateState = .downloading(progress)
+                    }
                 }
-                let dmg = FileManager.default.temporaryDirectory.appendingPathComponent("Muster-update.dmg")
-                try? FileManager.default.removeItem(at: dmg)
-                try FileManager.default.moveItem(at: downloaded, to: dmg)
-                try await Task.detached { try UpdateInstaller.install(dmgURL: dmg, replacing: appURL) }.value
-                try? FileManager.default.removeItem(at: dmg)
+                try Task.checkCancellation()
+                let signature = try Data(contentsOf: signatureURL)
+                updateState = .installing
+                try await Task.detached {
+                    try UpdateInstaller.install(dmgURL: dmg, signature: signature, publicKey: key,
+                        version: release.version, currentVersion: currentVersion, replacing: appURL)
+                }.value
                 UpdateInstaller.relaunch(appURL)
                 NSApp.terminate(nil)
             } catch {
-                updateState = .failed(L10n.t("Could not install the update: %@", error.localizedDescription))
+                if Task.isCancelled { updateState = .available(release) }
+                else { updateState = .failed(L10n.t("Could not install the update: %@", L10n.t(error.localizedDescription))) }
             }
         }
     }

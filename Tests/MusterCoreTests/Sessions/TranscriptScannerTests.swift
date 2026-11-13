@@ -78,6 +78,18 @@ import Testing
         #expect(try scanner(root).scan().isEmpty)
     }
 
+    @Test func configuredHistoryRetentionIncludesOlderFilesWithoutChangingRecentScans() throws {
+        let root = try makeSessionsTempDir(); defer { removeSessionsTempDir(root) }
+        try writeTranscript(root: root, dir: "project", id: "older-session", lines: [
+            #"{"cwd":"/work/project","sessionId":"older-session","message":"not retained"}"#
+        ], mtime: clock.now().addingTimeInterval(-10 * 86_400))
+        #expect(try scanner(root).scan().isEmpty)
+        let history = TranscriptScanner(projectsRoot: root, clock: clock, retention: 30 * 86_400)
+        #expect(try history.scan().map(\.id) == ["older-session"])
+        let configured = AgentRegistry.transcriptScanners(environment: ["CLAUDE_CONFIG_DIR": root.path], retention: 30 * 86_400)
+        #expect(configured.allSatisfy { $0.retention == 30 * 86_400 })
+    }
+
     @Test func readsOnlyBoundedChunksOfLargeFiles() throws {
         let root = try makeSessionsTempDir(); defer { removeSessionsTempDir(root) }
         // About 1 MB of synthetic filler lines between a head line and a tail line.
