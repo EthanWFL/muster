@@ -105,10 +105,12 @@ import MusterCore
     func resizedFrame(for window: NSWindow) throws -> NSRect {
         let screen = try #require(window.screen ?? NSScreen.main)
         let available = screen.visibleFrame.insetBy(dx: 16, dy: 16)
-        let size = NSSize(width: min(1180, available.width), height: min(760, available.height))
+        let size = NSSize(width: min(1180, available.width).rounded(.down),
+                          height: min(760, available.height).rounded(.down))
         try #require(size.width >= window.minSize.width && size.height >= window.minSize.height)
         // CI has a smaller screen; an off-screen fixture would exercise macOS clipping.
-        return NSRect(x: available.midX - size.width / 2, y: available.midY - size.height / 2,
+        return NSRect(x: (available.midX - size.width / 2).rounded(.down),
+                      y: (available.midY - size.height / 2).rounded(.down),
                       width: size.width, height: size.height)
     }
 }
