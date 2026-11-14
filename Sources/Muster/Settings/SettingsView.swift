@@ -245,7 +245,7 @@ struct SettingsView: View {
             Spacer(minLength: T.s2)
             switch updates.updateState {
             case .available(let release):
-                if release.asset != nil && updates.hasTrustedUpdateKey {
+                if updates.installationAvailability(for: release) == .ready {
                     Button(L10n.t("Download and Install")) { updates.installAvailableUpdate() }
                         .buttonStyle(PillButtonStyle(kind: .primary))
                 } else {
@@ -274,8 +274,13 @@ struct SettingsView: View {
         case .upToDate: return L10n.t("Muster is up to date.")
         case .available(let release):
             let title = L10n.t("Version %@ is available.", release.version)
-            return release.asset != nil && updates.hasTrustedUpdateKey ? title
-                : title + " " + L10n.t("Automatic installation is unavailable. Download from Releases.")
+            switch updates.installationAvailability(for: release) {
+            case .ready: return title
+            case .bootstrapRequired:
+                return title + " " + L10n.t("This build has no trusted update key. Install a signed release manually once to enable future in-app updates.")
+            case .unverifiedRelease:
+                return title + " " + L10n.t("This release has no verifiable installer and signature pair. Open Releases to inspect it.")
+            }
         case .downloading: return L10n.t("Downloading update…")
         case .installing: return L10n.t("Verifying and installing…")
         case .failed(let message): return message

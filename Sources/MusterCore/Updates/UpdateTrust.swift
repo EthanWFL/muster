@@ -7,6 +7,10 @@ public enum UpdateTrustError: String, LocalizedError {
     case invalidSize = "The update download is empty or exceeds the size limit."
     case wrongApplication = "The update contains a different application."
     case wrongVersion = "The update version does not match the selected release."
+    case changedKey = "The update does not preserve the installed app's trusted update key."
+    case invalidDestination = "The installed app could not be verified. Install a trusted copy before updating."
+    case destinationChanged = "The installed app changed during the update. No replacement was made."
+    case destinationNotWritable = "This installation location is not writable. Move Muster to a writable Applications folder first."
     public var errorDescription: String? { rawValue }
 }
 
@@ -35,12 +39,18 @@ public enum UpdateTrust {
         guard key.isValidSignature(signature, for: data) else { throw UpdateTrustError.invalidSignature }
     }
 
-    public static func validateBundle(info: [String: Any], expectedVersion: String, currentVersion: String) throws {
+    public static func validateBundle(info: [String: Any], expectedVersion: String, currentVersion: String,
+                                      expectedPublicKey: String? = nil) throws {
         guard info["CFBundleIdentifier"] as? String == "com.muster.app",
               info["CFBundleExecutable"] as? String == "Muster" else { throw UpdateTrustError.wrongApplication }
         let version = expectedVersion.hasPrefix("v") || expectedVersion.hasPrefix("V")
             ? String(expectedVersion.dropFirst()) : expectedVersion
         guard info["CFBundleShortVersionString"] as? String == version,
               AppVersion.isNewer(version, than: currentVersion) else { throw UpdateTrustError.wrongVersion }
+        if let expectedPublicKey {
+            guard hasValidKey(expectedPublicKey), info["MusterUpdatePublicKey"] as? String == expectedPublicKey else {
+                throw UpdateTrustError.changedKey
+            }
+        }
     }
 }

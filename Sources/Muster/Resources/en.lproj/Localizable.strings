@@ -557,3 +557,10 @@
 "Manage skills in the main window" = "Manage skills in the main window";
 "Saved defaults apply to new Agent sessions." = "Saved defaults apply to new Agent sessions.";
 "Select Agent" = "Select Agent";
+
+"This build has no trusted update key. Install a signed release manually once to enable future in-app updates." = "This build has no trusted update key. Install a signed release manually once to enable future in-app updates.";
+"This release has no verifiable installer and signature pair. Open Releases to inspect it." = "This release has no verifiable installer and signature pair. Open Releases to inspect it.";
+"The update does not preserve the installed app's trusted update key." = "The update does not preserve the installed app's trusted update key.";
+"The installed app could not be verified. Install a trusted copy before updating." = "The installed app could not be verified. Install a trusted copy before updating.";
+"The installed app changed during the update. No replacement was made." = "The installed app changed during the update. No replacement was made.";
+"This installation location is not writable. Move Muster to a writable Applications folder first." = "This installation location is not writable. Move Muster to a writable Applications folder first.";

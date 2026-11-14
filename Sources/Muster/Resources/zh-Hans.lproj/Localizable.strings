@@ -558,3 +558,10 @@
 "Manage skills in the main window" = "在大窗口中管理技能";
 "Saved defaults apply to new Agent sessions." = "保存的默认配置将在新 Agent 会话中生效。";
 "Select Agent" = "选择 Agent";
+
+"This build has no trusted update key. Install a signed release manually once to enable future in-app updates." = "此构建没有可信更新公钥，请手动安装一次带公钥的正式版，之后即可在应用内更新。";
+"This release has no verifiable installer and signature pair. Open Releases to inspect it." = "此版本缺少可验证的安装包或签名，请前往发布页查看。";
+"The update does not preserve the installed app's trusted update key." = "更新包未保留当前应用的可信更新公钥，已停止安装。";
+"The installed app could not be verified. Install a trusted copy before updating." = "无法验证当前安装的应用，请先正常安装可信版本再更新。";
+"The installed app changed during the update. No replacement was made." = "当前应用在更新过程中发生了变化，未执行替换。";
+"This installation location is not writable. Move Muster to a writable Applications folder first." = "当前安装位置不可写，请先将 Muster 移到可写的应用目录。";

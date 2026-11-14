@@ -45,6 +45,9 @@ final class SettingsCoordinator: ObservableObject {
     }
 
     var hasTrustedUpdateKey: Bool { UpdateTrust.hasValidKey(updateKey) }
+    func installationAvailability(for release: UpdateRelease) -> UpdateInstallationAvailability {
+        release.installationAvailability(publicKey: updateKey)
+    }
 
     func checkForUpdates() {
         guard !updateBusy else { return }
@@ -107,7 +110,7 @@ final class SettingsCoordinator: ObservableObject {
                     try UpdateInstaller.install(dmgURL: dmg, signature: signature, publicKey: key,
                         version: release.version, currentVersion: currentVersion, replacing: appURL)
                 }.value
-                UpdateInstaller.relaunch(appURL)
+                try UpdateInstaller.relaunch(appURL)
                 NSApp.terminate(nil)
             } catch {
                 if Task.isCancelled { updateState = .available(release) }

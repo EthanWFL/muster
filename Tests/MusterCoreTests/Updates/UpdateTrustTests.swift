@@ -66,4 +66,18 @@ import Testing
             try UpdateTrust.validateBundle(info: info, expectedVersion: "v1.2.3", currentVersion: "1.2.2")
         }
     }
+
+    @Test func updatesCannotDropOrReplaceTheInstalledTrustAnchor() throws {
+        let key = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString()
+        var info = ["CFBundleIdentifier": "com.muster.app", "CFBundleExecutable": "Muster", "CFBundleShortVersionString": "1.1.1"]
+        #expect(throws: UpdateTrustError.changedKey) {
+            try UpdateTrust.validateBundle(info: info, expectedVersion: "1.1.1", currentVersion: "1.1.0", expectedPublicKey: key)
+        }
+        info["MusterUpdatePublicKey"] = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString()
+        #expect(throws: UpdateTrustError.changedKey) {
+            try UpdateTrust.validateBundle(info: info, expectedVersion: "1.1.1", currentVersion: "1.1.0", expectedPublicKey: key)
+        }
+        info["MusterUpdatePublicKey"] = key
+        try UpdateTrust.validateBundle(info: info, expectedVersion: "1.1.1", currentVersion: "1.1.0", expectedPublicKey: key)
+    }
 }

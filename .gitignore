@@ -5,3 +5,5 @@ dist/
 *.dmg
 .DS_Store
 .build-*/
+# The persistent release private key belongs outside every checkout.
+update-signing.key

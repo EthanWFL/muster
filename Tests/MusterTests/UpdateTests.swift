@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import MusterCore
 import Testing
 @testable import Muster
@@ -21,6 +22,22 @@ import Testing
             #expect(manual.asset == nil)
             #expect(manual.url == good.url)
         }
+    }
+
+    @Test func distinguishesOneTimeMigrationFromMissingReleaseSignature() throws {
+        let signed = try #require(try UpdateChecker.parse(release()))
+        let unsigned = try #require(try UpdateChecker.parse(release(signature: false)))
+        let key = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString()
+        #expect(signed.installationAvailability(publicKey: nil) == .bootstrapRequired)
+        #expect(unsigned.installationAvailability(publicKey: nil) == .bootstrapRequired)
+        #expect(unsigned.installationAvailability(publicKey: key) == .unverifiedRelease)
+        #expect(signed.installationAvailability(publicKey: key) == .ready)
+    }
+
+    @Test func releasePublicKeyIsPinnedInTheRepository() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let key = try String(contentsOf: root.appendingPathComponent("Resources/UpdatePublicKey.txt"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(UpdateTrust.hasValidKey(key))
     }
 
     @Test func invalidSignatureNeverMountsOrReplacesTheInstalledApp() throws {

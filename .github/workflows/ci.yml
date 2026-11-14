@@ -26,3 +26,7 @@ jobs:
         run: Scripts/package.sh
       - name: Verify update signing tool
         run: bash Scripts/test-update-signing.sh
+      - name: Verify release signing configuration
+        run: python3 Scripts/test-release-configuration.py
+      - name: Verify isolated update installation and relaunch
+        run: python3 Scripts/test-update-installation.py

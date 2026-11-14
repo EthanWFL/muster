@@ -2,7 +2,23 @@ import CryptoKit
 import Foundation
 
 enum SigningError: Error {
-    case usage, invalidKey, keyMismatch, invalidSize, invalidSignature
+    case usage, invalidKey, keyMismatch, invalidSize, invalidSignature, unsafeKeyFile
+}
+
+func validatePrivateKeyFile(_ path: String, repository: String) throws {
+    let url = URL(fileURLWithPath: path).standardizedFileURL
+    let resolved = url.resolvingSymlinksInPath()
+    let root = URL(fileURLWithPath: repository).resolvingSymlinksInPath().path
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let directory = try FileManager.default.attributesOfItem(atPath: resolved.deletingLastPathComponent().path)
+    guard path.hasPrefix("/"), !resolved.path.hasPrefix(root + "/"), !url.path.hasPrefix(root + "/"),
+          attributes[.type] as? FileAttributeType == .typeRegular,
+          (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+          (attributes[.posixPermissions] as? NSNumber).map({ $0.intValue & 0o077 == 0 }) == true,
+          (directory[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+          (directory[.posixPermissions] as? NSNumber).map({ $0.intValue & 0o077 == 0 }) == true
+    else { throw SigningError.unsafeKeyFile }
+    _ = try privateKey(path)
 }
 
 func publicKey(_ text: String) throws -> Curve25519.Signing.PublicKey {
@@ -27,6 +43,8 @@ do {
     switch args.first {
     case "check-key" where args.count == 2:
         _ = try publicKey(args[1])
+    case "check-private-key" where args.count == 3:
+        try validatePrivateKeyFile(args[1], repository: args[2])
     case "generate-key" where args.count == 2:
         let key = Curve25519.Signing.PrivateKey()
         // Never overwrite an existing key; the private material is never printed.
@@ -52,6 +70,6 @@ do {
 } catch {
     // Error names contain no private key data.
     fputs("Update signing failed: \(error)\n", stderr)
-    fputs("Usage: swift Scripts/sign-update.swift generate-key KEY_FILE | public-key KEY_FILE | check-key PUBLIC_KEY | sign DMG KEY_FILE PUBLIC_KEY SIG_FILE | verify DMG SIG_FILE PUBLIC_KEY\n", stderr)
+    fputs("Usage: swift Scripts/sign-update.swift generate-key KEY_FILE | public-key KEY_FILE | check-key PUBLIC_KEY | check-private-key KEY_FILE REPOSITORY | sign DMG KEY_FILE PUBLIC_KEY SIG_FILE | verify DMG SIG_FILE PUBLIC_KEY\n", stderr)
     exit(1)
 }

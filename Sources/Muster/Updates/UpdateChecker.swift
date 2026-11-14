@@ -10,7 +10,14 @@ struct UpdateRelease: Equatable, Sendable {
     let version: String
     let url: URL
     let asset: UpdateAsset?
+
+    func installationAvailability(publicKey: String?) -> UpdateInstallationAvailability {
+        guard UpdateTrust.hasValidKey(publicKey) else { return .bootstrapRequired }
+        return asset == nil ? .unverifiedRelease : .ready
+    }
 }
+
+enum UpdateInstallationAvailability { case ready, bootstrapRequired, unverifiedRelease }
 
 enum UpdateCheckError: LocalizedError {
     case http(Int)
