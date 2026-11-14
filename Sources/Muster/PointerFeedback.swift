@@ -37,12 +37,14 @@ extension View {
 }
 
 struct InteractivePlainButtonStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.97
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .hoverHighlight()
-            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
+            .modifier(ButtonPressFeedback(isPressed: configuration.isPressed, scale: pressedScale))
+            .opacity(isEnabled ? 1 : 0.4)
             .pointerCursor()
     }
 }

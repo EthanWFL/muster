@@ -38,6 +38,7 @@ public final class OrphanDetector: @unchecked Sendable {
 
     private struct Track {
         var sessionID: String
+        var agentID: String
         var name: String?
         var ppid: Int32
         var samples: RingBuffer<Sample>?
@@ -47,6 +48,7 @@ public final class OrphanDetector: @unchecked Sendable {
     private let clock: Clock
     private let lock = NSLock()
     private var tracks: [ProcessIdentity: Track] = [:]
+    private var managedAgentIDs: Set<String>?
 
     public init(clock: Clock = SystemClock(), thresholds: OrphanThresholds = OrphanThresholds()) {
         self.clock = clock
@@ -60,7 +62,14 @@ public final class OrphanDetector: @unchecked Sendable {
 
     /// A parent exiting is precisely when its tracked children still need observation.
     public func needsSampling(sessions: [Session]) -> Bool {
-        trackedCount > 0 || sessions.contains { $0.pid != nil && $0.state != .ended }
+        lock.lock(); defer { lock.unlock() }
+        return !tracks.isEmpty || sessions.contains { $0.pid != nil && $0.state != .ended && (managedAgentIDs?.contains($0.agent.rawValue) ?? true) }
+    }
+
+    public func restrictToAgents(_ ids: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        managedAgentIDs = ids
+        tracks = tracks.filter { ids.contains($0.value.agentID) }
     }
 
     /// 喂入一次快照：登记 session 树内的进程，更新已登记进程的采样。
@@ -78,13 +87,13 @@ public final class OrphanDetector: @unchecked Sendable {
         }
 
         // 2. 登记：目前位于 session 进程树内的进程
-        for session in sessions {
+        for session in sessions where managedAgentIDs?.contains(session.agent.rawValue) ?? true {
             guard let root = snapshot.rootRecord(for: session) else { continue }
             for (pid, record) in snapshot.processes where snapshot.isDescendant(pid, of: root.pid) {
                 guard let identity = record.identity else { continue }
                 if tracks[identity] == nil {
                     guard tracks.count < thresholds.maxTracked else { continue }
-                    tracks[identity] = Track(sessionID: session.id, name: record.name, ppid: record.ppid, samples: nil)
+                    tracks[identity] = Track(sessionID: session.id, agentID: session.agent.rawValue, name: record.name, ppid: record.ppid, samples: nil)
                 }
             }
         }

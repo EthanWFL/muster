@@ -1,6 +1,7 @@
 import MusterCore
 import AppKit
 import Foundation
+import Combine
 
 /// 面板状态与会话扫描的装配点；所有发布状态都在主线程更新。
 @MainActor
@@ -18,6 +19,11 @@ final class PanelModel: ObservableObject {
     @Published private(set) var searchFocusRequest = 0
     @Published private(set) var lastSessionRefresh: Date?
     @Published private(set) var resumingSessionKey: String?
+    private var allScannedSessions: [Session] = []
+    private var scopeObservation: AnyCancellable?
+    private var lastAppliedAgentIDs: Set<String>?
+    private var started = false
+    private var sessionRescanRequested = false
 
     func focusSessionSearch(showInManagementWindow: Bool = true) {
         if showInManagementWindow { showsSettings = false }
@@ -38,16 +44,15 @@ final class PanelModel: ObservableObject {
     private var diskTimer: Timer?
 
     enum Tab: String, CaseIterable {
-        case sessions = "Sessions", environment = "Environment",
-             instructions = "Instructions", configuration = "Configuration"
+        case projects = "Projects", sessions = "Sessions", agent = "Agent", environment = "Environment"
 
         /// rawValue 存在偏好里，保持不变；显示名单独映射
         var title: String {
             switch self {
+            case .projects: return L10n.t("Projects")
             case .sessions: return L10n.t("Sessions")
             case .environment: return L10n.t("Cleanup")
-            case .instructions: return L10n.t("Rules")
-            case .configuration: return L10n.t("Configuration")
+            case .agent: return L10n.t("Agent")
             }
         }
     }
@@ -58,6 +63,7 @@ final class PanelModel: ObservableObject {
     static let tabKey = "MusterLastTab"
 
     private static func storedTab() -> Tab {
+        AgentNavigation.migrate(.standard)
         guard let raw = UserDefaults.standard.string(forKey: tabKey),
               let tab = Tab(rawValue: raw) else { return .sessions }
         return tab
@@ -85,6 +91,7 @@ final class PanelModel: ObservableObject {
     }
 
     private static func storedTabOrder() -> [Tab] {
+        AgentNavigation.migrate(.standard)
         let raw = UserDefaults.standard.stringArray(forKey: tabOrderKey) ?? []
         return raw.compactMap(Tab.init(rawValue:))
     }
@@ -103,17 +110,64 @@ final class PanelModel: ObservableObject {
     }
 
     let env = EnvironmentModel()
-    let instructions = InstructionsModel()
-    let configuration = ConfigurationModel()
+    let instructions: InstructionsModel
+    let configuration: ConfigurationModel
     let diagnostics = DiagnosticsModel()
     let library: SessionLibraryModel
+    let projects: ProjectsModel
+    let agentWorkspace: AgentWorkspaceModel
+    let agentSelection: AgentSelectionModel
 
-    init(library: SessionLibraryModel? = nil) { self.library = library ?? SessionLibraryModel() }
+    init(library: SessionLibraryModel? = nil, projectStore: ProjectStore = ProjectStore(),
+         projectDefaults: UserDefaults = .standard, instructionsModel: InstructionsModel? = nil,
+         configurationModel: ConfigurationModel? = nil, skillsModel: SkillsModel? = nil,
+         detectInstalledAgents: @escaping @Sendable () -> [AgentDescriptor] = { AgentInstallation.detect() },
+         settingsStore: SettingsStore? = nil) {
+        let library = library ?? SessionLibraryModel()
+        self.library = library
+        instructions = instructionsModel ?? InstructionsModel()
+        configuration = configurationModel ?? ConfigurationModel()
+        projects = ProjectsModel(library: library, store: projectStore, defaults: projectDefaults)
+        agentSelection = AgentSelectionModel(settings: settingsStore ?? SettingsStore.shared, detect: detectInstalledAgents)
+        agentWorkspace = AgentWorkspaceModel(instructions: instructions, configuration: configuration, skills: skillsModel,
+                                             selection: agentSelection)
+        scopeObservation = agentSelection.$state.sink { [weak self] state in
+            guard let self else { return }
+            self.objectWillChange.send()
+            guard self.lastAppliedAgentIDs != state.managedIDs else { return }
+            self.lastAppliedAgentIDs = state.managedIDs
+            self.applyAgentScope(state.managedIDs)
+        }
+    }
+
+    private func applyAgentScope(_ ids: Set<String>) {
+        sessions = allScannedSessions.filter { ids.contains($0.agent.rawValue) }
+        library.managedAgentIDs = ids
+        diagnostics.restrictToAgents(ids)
+        env.restrictToAgents(ids)
+        activityMonitor = SessionActivityMonitor()
+        if let key = selectedSessionKey, !sessions.contains(where: { $0.key == key }) { selectedSessionKey = nil }
+        if started { refreshSessions() }
+    }
+
+    func openLibrarySession(_ entry: LibrarySession) {
+        guard !library.isSaving else { return }
+        library.scope = entry.session.hasTranscript ? .history : .recent
+        library.filter = .all
+        sessionSearch = ""
+        library.select(entry.id)
+        showsSettings = false
+        tab = .sessions
+    }
 
     func start() {
+        started = true
+        agentSelection.refresh()
         library.load()
+        projects.load()
         notifier.start()
-        env.sessionsProvider = { [weak self] in self?.sessions ?? [] }
+        // Cleanup needs every live root for ownership checks, even roots hidden by the UI scope.
+        env.sessionsProvider = { [weak self] in self?.allScannedSessions ?? [] }
         env.startSampling()
         refreshSessions()
         diskTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
@@ -122,13 +176,17 @@ final class PanelModel: ObservableObject {
     }
 
     func stop() {
+        started = false
+        sessionRescanRequested = false
         diskTimer?.invalidate()
         scanTask?.cancel()
         library.cancelImport()
+        agentWorkspace.skills.cancel()
         env.stop()
     }
 
     func jumpToTerminal(_ session: Session) {
+        guard agentSelection.manages(session.agent.rawValue) else { return }
         let jumper = terminalJumper
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = jumper.jump(to: session)
@@ -149,6 +207,7 @@ final class PanelModel: ObservableObject {
     }
 
     func copyResume(_ session: Session) {
+        guard agentSelection.manages(session.agent.rawValue) else { return }
         guard let command = session.resumeCommand else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
@@ -156,6 +215,7 @@ final class PanelModel: ObservableObject {
     }
 
     func continueSession(_ session: Session) {
+        guard agentSelection.manages(session.agent.rawValue) else { return }
         if session.isProcessAlive { jumpToTerminal(session); return }
         guard resumingSessionKey == nil, session.resumeCommand != nil else { return }
         resumingSessionKey = session.key
@@ -174,9 +234,10 @@ final class PanelModel: ObservableObject {
     }
 
     func refreshSessions() {
-        guard !isRefreshingSessions else { return }
+        guard !isRefreshingSessions else { sessionRescanRequested = true; return }
         isRefreshingSessions = true
-        let scanners = scanners
+        let ids = lastAppliedAgentIDs ?? agentSelection.state.managedIDs
+        let scanners = scanners.filter { ids.contains($0.agent.rawValue) }
         let store = sessionStore
         scanTask = Task { [weak self] in
             let scan = await Task.detached(priority: .utility) {
@@ -184,23 +245,26 @@ final class PanelModel: ObservableObject {
                 for scanner in scanners {
                     if let found = try? scanner.scan() { transcripts += found }
                 }
-                let processes = AgentProcessScanner().scan()
+                let processes = ids.isEmpty ? [] : AgentProcessScanner().scan()
                 var list = store.refresh(transcripts: transcripts, processes: processes)
                     .filter { $0.state != .ended }
                 var branches: [String: String] = [:]
-                for cwd in Set(list.map(\.cwd)) { branches[cwd] = SessionInsights.branch(cwd: cwd) }
+                for cwd in Set(list.filter { ids.contains($0.agent.rawValue) }.map(\.cwd)) { branches[cwd] = SessionInsights.branch(cwd: cwd) }
                 for index in list.indices { list[index].branch = branches[list[index].cwd] }
                 return (list: list, transcripts: transcripts)
             }.value
             guard let self else { return }
             isRefreshingSessions = false
             guard !Task.isCancelled else { return }
-            let list = scan.list
+            allScannedSessions = scan.list
+            let currentIDs = agentSelection.state.managedIDs
+            let list = scan.list.filter { currentIDs.contains($0.agent.rawValue) }
             sessions = list
-            library.observe(transcripts: scan.transcripts, live: list)
+            library.observe(transcripts: scan.transcripts.filter { currentIDs.contains($0.agent.rawValue) }, live: list)
             lastSessionRefresh = Date()
             let quiet = activityMonitor.newlyQuiet(list, now: Date())
             if !quiet.isEmpty { notifier.notifyQuiet(quiet) }
+            if sessionRescanRequested { sessionRescanRequested = false; refreshSessions() }
         }
     }
 }

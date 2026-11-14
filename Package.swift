@@ -8,8 +8,11 @@ let package = Package(
     products: [
         .executable(name: "Muster", targets: ["Muster"]),
     ],
+    dependencies: [
+        .package(path: "Vendor/Yams"),
+    ],
     targets: [
-        .target(name: "MusterCore"),
+        .target(name: "MusterCore", dependencies: [.product(name: "Yams", package: "Yams")]),
         .executableTarget(
             name: "Muster",
             dependencies: ["MusterCore"],

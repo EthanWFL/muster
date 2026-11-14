@@ -1,0 +1,2 @@
+# Preserve upstream vendored sources verbatim.
+Vendor/Yams/** linguist-vendored -whitespace

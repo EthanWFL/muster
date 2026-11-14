@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 // MARK: - 颜色
@@ -17,31 +18,27 @@ extension Color {
 
 // MARK: - 外观
 
-/// 跟随系统的深浅色。
-///
-/// 不用 `NSColor` 的动态 provider + `Color(nsColor:)`：SwiftUI 会把那只颜色按第一次渲染的
-/// 外观定死，切换系统外观后不重新解析。这里把「现在是深色吗」变成可观察状态，所有 token
-/// 在视图求值时取具体色值，根视图观察它就能整套重画。
-@MainActor
-final class Theme: ObservableObject {
+/// Reading a color token registers its appearance dependency in every SwiftUI view,
+/// including nested cards and controls, without recreating their local state.
+@Observable @MainActor
+final class Theme {
     static let shared = Theme()
 
-    @Published private(set) var isDark = false
+    private(set) var isDark = false
+    @ObservationIgnored private var appearanceObservation: NSKeyValueObservation?
 
     private init() {
         isDark = Self.darkNow()
-        DistributedNotificationCenter.default.addObserver(
-            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
-            object: nil, queue: .main
-        ) { [weak self] _ in
+        // Observe the resolved appearance, after AppKit has applied a system change
+        // or app override; notification timing must not leave custom colors stale.
+        appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.refresh() }
         }
-        // 通知偶尔会漏，App 重新激活时再对一次
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
+    }
+
+    func apply(_ preference: AppAppearance) {
+        NSApplication.shared.appearance = preference.appKitAppearance
+        refresh()
     }
 
     func refresh() {
@@ -79,13 +76,16 @@ enum T {
     // 文字
     static var fg: Color { pick(light: 0x1C1C21, dark: 0xEDEDF1) }
     static var fg2: Color { pick(light: 0x4B4B53, dark: 0xB9B9C1) }
-    static var muted: Color { pick(light: 0x85858D, dark: 0x8B8B94) }
+    /// Readable supporting text on the page, cards and control surfaces.
+    static var muted: Color { pick(light: 0x6B6B74, dark: 0x9797A1) }
+    /// Reserved for disabled or decorative details, never supporting text/actions.
     static var faint: Color { pick(light: 0xB9B9C2, dark: 0x56565F) }
     /// 控件上的安静文字：每种底色上都压到 4.5:1 以上
     static var ctlFg: Color { pick(light: 0x63636B, dark: 0xA1A1AA) }
 
     // 唯一强调色 + 语义色
     static var accent: Color { pick(light: 0x4F46E5, dark: 0xA5B4FC) }
+    static var onAccent: Color { pick(light: 0xFFFFFF, dark: 0x1A1A1E) }
     static var accentSoft: Color { pick(light: 0xEEEDFD, dark: 0x2B2C47) }
     static var green: Color { pick(light: 0x189A58, dark: 0x6FD99B) }
     static var red: Color { pick(light: 0xD64545, dark: 0xF28B82) }
@@ -102,7 +102,7 @@ enum T {
     static var rowSingle: CGFloat { comfortable ? 38 : 34 }
     static var rowDouble: CGFloat { comfortable ? 48 : 40 }
     static var controlHeight: CGFloat { comfortable ? 28 : 24 }
-    static var iconHitSize: CGFloat { comfortable ? 26 : 22 }
+    static var iconHitSize: CGFloat { comfortable ? 28 : 24 }
 
     // 圆角
     static let rInner: CGFloat = 5

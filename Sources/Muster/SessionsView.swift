@@ -129,11 +129,11 @@ struct SessionsView: View {
                 Text("\(visibleSessions.count)/\(model.sessions.count)")
                     .font(T.micro).monospacedDigit().foregroundStyle(T.muted)
                     .accessibilityLabel(L10n.t("%d of %d sessions", visibleSessions.count, model.sessions.count))
-                IconButton(symbol: "arrow.clockwise", label: L10n.t("Rescan open sessions"), tint: T.ctlFg) {
+                IconButton(symbol: "arrow.clockwise", label: L10n.t("Rescan open sessions"),
+                           tint: T.ctlFg, isBusy: model.isRefreshingSessions) {
                     model.refreshSessions()
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(model.isRefreshingSessions)
             }
         }
         .padding(T.s3)

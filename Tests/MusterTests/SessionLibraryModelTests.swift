@@ -8,6 +8,31 @@ import MusterCore
         Session(id: id, agent: .claude, cwd: "/work/project", startedAt: Date(), state: .idle)
     }
 
+    @Test func saveFeedbackDoesNotOutliveTheSavedDraft() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let catalog = SessionCatalog(url: root.appendingPathComponent("library.json"))
+        let model = SessionLibraryModel(catalog: catalog, historyScanner: { _ in [] })
+        let record = source("saved-draft")
+        model.observe(transcripts: [record], live: [])
+        await model.observationTask?.value
+        model.select(record.key)
+        model.draft.notes = "Saved note"
+        model.save()
+        await model.operationTask?.value
+        #expect(!model.dirty)
+        #expect(model.notice == nil) // The editor's saved state is the single source of feedback.
+        #expect(try await catalog.load().sessions.first?.annotation.notes == "Saved note")
+
+        model.draft.notes = "New unsaved note"
+        #expect(model.dirty)
+        #expect(model.notice == nil)
+        #expect(try await catalog.load().sessions.first?.annotation.notes == "Saved note")
+        model.reloadDraft()
+        #expect(!model.dirty)
+        #expect(model.draft.notes == "Saved note")
+    }
+
     @Test func dirtyEditorSurvivesRefreshAndRequiresExplicitSelectionChoice() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -30,6 +55,7 @@ import MusterCore
         await model.operationTask?.value
         #expect(model.selectedID == b.key)
         #expect(!model.dirty)
+        #expect(model.notice == nil) // Switching must not carry a previous session's save banner.
         #expect(try await catalog.load().sessions.first { $0.id == a.key }?.annotation.notes == "Unsaved note")
         model.draft.title = "Not saved"
         model.select(a.key)

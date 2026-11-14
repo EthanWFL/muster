@@ -5,13 +5,20 @@ import SwiftUI
 final class DiagnosticsModel: ObservableObject {
     @Published private(set) var reports: [AgentDiagnostic] = []
     @Published private(set) var isChecking = false
+    private var managedAgentIDs: Set<String>?
+
+    func restrictToAgents(_ ids: Set<String>) {
+        managedAgentIDs = ids
+        reports = reports.filter { ids.contains($0.id) }
+    }
 
     func check() {
         guard !isChecking else { return }
         isChecking = true
+        let ids = managedAgentIDs
         Task { [weak self] in
-            let reports = await Task.detached(priority: .utility) { AgentDiagnostics.scan() }.value
-            self?.reports = reports
+            let reports = await Task.detached(priority: .utility) { AgentDiagnostics.scan(agentIDs: ids) }.value
+            self?.reports = reports.filter { self?.managedAgentIDs?.contains($0.id) ?? true }
             self?.isChecking = false
         }
     }

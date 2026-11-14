@@ -2,11 +2,12 @@ import AppKit
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, notifications, interface, diagnostics, about
+    case general, agents, notifications, interface, diagnostics, about
     var id: Self { self }
     var title: String {
         switch self {
         case .general: return L10n.t("General")
+        case .agents: return L10n.t("Agent scope")
         case .notifications: return L10n.t("Notifications")
         case .interface: return L10n.t("Interface")
         case .diagnostics: return L10n.t("Diagnostics")
@@ -16,6 +17,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "slider.horizontal.3"
+        case .agents: return "terminal"
         case .notifications: return "bell"
         case .interface: return "rectangle.3.group"
         case .diagnostics: return "waveform.path.ecg"
@@ -30,7 +32,7 @@ struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var model: PanelModel
     @ObservedObject private var updates = SettingsCoordinator.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ReducedMotion private var reduceMotion
     @State private var webhookResult: String?
     @State private var hasPositionedInitialSection = false
 
@@ -85,6 +87,7 @@ struct SettingsView: View {
     @ViewBuilder private func sectionContent(_ section: SettingsSection) -> some View {
         switch section {
         case .general: general
+        case .agents: AgentSelectionSettingsView(selection: model.agentSelection)
         case .notifications: notifications
         case .interface: interface
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
@@ -155,11 +158,24 @@ struct SettingsView: View {
         }
     }
 
-    /// 语言 + 标签顺序：都只影响界面本身
+    /// 外观、语言与布局设置。
     private var interface: some View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("Interface"))
             Card {
+                SettingsRow(label: L10n.t("Appearance")) {
+                    SegmentedControl(items: AppAppearance.allCases, selection: $store.appearance,
+                                     label: \.title)
+                        .frame(width: 252)
+                }
+                Hairline()
+                SettingsRow(label: L10n.t("Reduce Motion"),
+                            hint: L10n.t("Reduce button, navigation and logo animations.")) {
+                    SegmentedControl(items: ReduceMotionPreference.allCases, selection: $store.reduceMotion,
+                                     label: \.title)
+                        .frame(width: 252)
+                }
+                Hairline()
                 SettingsRow(label: L10n.t("Language")) {
                     InlineSelect(
                         items: L10n.Language.allCases.map(\.rawValue),
@@ -197,10 +213,10 @@ struct SettingsView: View {
                     Text("Muster " + store.appVersion)
                         .font(T.small).monospacedDigit().foregroundStyle(T.fg2)
                     Spacer(minLength: T.s2)
-                    IconButton(symbol: "arrow.triangle.2.circlepath", label: L10n.t("Check for Updates…"), tint: T.ctlFg) {
+                    IconButton(symbol: "arrow.triangle.2.circlepath", label: L10n.t("Check for Updates…"),
+                               tint: T.ctlFg, isBusy: updates.updateBusy) {
                         updates.checkForUpdates()
                     }
-                    .disabled(updates.updateBusy)
                 }
                 .padding(.horizontal, T.s3)
                 .frame(height: T.rowSingle)
@@ -301,6 +317,7 @@ private struct SettingsSectionFrames: PreferenceKey {
 struct TabOrderChips: View {
     @ObservedObject var model: PanelModel
     @State private var dragging: PanelModel.Tab?
+    @ReducedMotion private var reduceMotion
 
     var body: some View {
         HStack(spacing: T.s2) {
@@ -310,7 +327,8 @@ struct TabOrderChips: View {
                         dragging = tab
                         return NSItemProvider(object: tab.rawValue as NSString)
                     }
-                    .onDrop(of: [.text], delegate: TabChipDrop(item: tab, model: model, dragging: $dragging))
+                    .onDrop(of: [.text], delegate: TabChipDrop(item: tab, model: model,
+                                                             dragging: $dragging, reduceMotion: reduceMotion))
             }
         }
     }
@@ -341,13 +359,14 @@ private struct TabChipDrop: DropDelegate {
     let item: PanelModel.Tab
     let model: PanelModel
     @Binding var dragging: PanelModel.Tab?
+    let reduceMotion: Bool
 
     func dropEntered(info: DropInfo) {
         MainActor.assumeIsolated {
             guard let dragging, dragging != item,
                   let from = model.orderedTabs.firstIndex(of: dragging),
                   let to = model.orderedTabs.firstIndex(of: item) else { return }
-            withAnimation(.snappy(duration: 0.16)) { model.moveTab(from: from, to: to) }
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.16)) { model.moveTab(from: from, to: to) }
         }
     }
 

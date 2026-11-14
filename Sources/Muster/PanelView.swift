@@ -10,9 +10,7 @@ struct PanelView: View {
     var onClose: (() -> Void)? = nil
     @ObservedObject var surface = PanelSurfaceState()
     @ObservedObject private var settings = SettingsStore.shared
-    /// 观察外观：深浅色一变，整块 token 重新求值
-    @ObservedObject private var theme = Theme.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ReducedMotion private var reduceMotion
     @FocusState private var focused: Bool
     private var isShowingSettings: Bool { presentation == .window && model.showsSettings }
 
@@ -44,6 +42,17 @@ struct PanelView: View {
 
     private var pageAndFooter: some View {
         VStack(spacing: 0) {
+            if !isShowingSettings, model.agentSelection.state.hasDetected, model.agentSelection.state.managedIDs.isEmpty {
+                HStack {
+                    Text(L10n.t("No Agents selected for Muster.")).font(T.small).foregroundStyle(T.muted)
+                    Spacer()
+                    Button(L10n.t("Choose Agents")) {
+                        model.showSettings(.agents)
+                        if presentation == .popover { onOpenSettings?() }
+                    }.buttonStyle(PillButtonStyle(kind: .secondary))
+                }.padding(T.s3)
+                Hairline()
+            }
             Group {
                 if isShowingSettings {
                     SettingsView(store: settings, model: model)
@@ -89,7 +98,12 @@ struct PanelView: View {
                     .padding(.bottom, T.s2)
                 Hairline()
             }
-            if model.tab == .sessions {
+            if model.tab == .projects {
+                ProjectsView(model: model, projects: model.projects, library: model.library,
+                             onOpenWindow: onOpenWindow)
+            } else if model.tab == .agent {
+                AgentWorkspaceView(workspace: model.agentWorkspace, onOpenWindow: onOpenWindow)
+            } else if model.tab == .sessions {
                 if presentation == .window {
                     SessionLibraryView(model: model, library: model.library)
                 } else {
@@ -99,10 +113,8 @@ struct PanelView: View {
                 ScrollView(.vertical) {
                     Group {
                         switch model.tab {
-                        case .sessions: EmptyView()
+                        case .sessions, .projects, .agent: EmptyView()
                         case .environment: EnvironmentView(model: model, env: model.env, visibilityOwner: surfaceID)
-                        case .instructions: InstructionsView(model: model.instructions)
-                        case .configuration: ConfigurationView(model: model.configuration)
                         }
                     }
                     .padding(presentation == .window ? T.s4 : T.s2)
@@ -161,15 +173,26 @@ struct PanelHeaderActions: View {
     var onOpenWindow: (() -> Void)? = nil
     var onOpenSettings: (() -> Void)? = nil
     @ObservedObject private var settings = SettingsStore.shared
-    @ObservedObject private var theme = Theme.shared
+    private var isShowingSettings: Bool { presentation == .window && model.showsSettings }
 
     var body: some View {
         HStack(spacing: T.s2) {
-            iconButton("magnifyingglass", help: L10n.t("Search sessions · ⌘F"), shortcut: "f") {
-                model.focusSessionSearch(showInManagementWindow: presentation == .window)
+            iconButton("magnifyingglass", help: searchHelp, shortcut: "f") {
+                if model.tab == .projects && !isShowingSettings { model.projects.focusSearch() }
+                else if model.tab == .agent && !isShowingSettings {
+                    if presentation == .popover {
+                        model.agentWorkspace.openQuickInWindow(skills: true)
+                        onOpenWindow?()
+                    }
+                    model.agentWorkspace.focusSkills()
+                }
+                else { model.focusSessionSearch(showInManagementWindow: presentation == .window) }
             }
             if let onOpenWindow {
-                iconButton("arrow.up.left.and.arrow.down.right", help: L10n.t("Open management window"), action: onOpenWindow)
+                iconButton("arrow.up.left.and.arrow.down.right", help: L10n.t("Open management window")) {
+                    if presentation == .popover, model.tab == .agent { model.agentWorkspace.openQuickInWindow() }
+                    onOpenWindow()
+                }
             }
             iconButton("arrow.up.right.square", help: L10n.t("Open the GitHub repository")) {
                 model.openRepository()
@@ -178,6 +201,14 @@ struct PanelHeaderActions: View {
                 iconButton("gearshape", help: L10n.t("Settings…"), shortcut: ",", action: onOpenSettings)
             }
         }
+    }
+
+    private var searchHelp: String {
+        if !isShowingSettings {
+            if model.tab == .projects { return L10n.t("Search projects · ⌘F") }
+            if model.tab == .agent { return L10n.t("Search skills · ⌘F") }
+        }
+        return L10n.t("Search sessions · ⌘F")
     }
 
     private func iconButton(
@@ -191,7 +222,7 @@ struct PanelHeaderActions: View {
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(InteractivePlainButtonStyle())
+        .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.90))
         .help(help)
         .accessibilityLabel(help)
         .modifier(OptionalShortcut(key: shortcut))

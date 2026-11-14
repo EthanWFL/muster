@@ -4,14 +4,55 @@ import SwiftUI
 /// 「指令」页：写一次，所有开启的 agent 在每次对话前都读到。
 struct InstructionsView: View {
     @ObservedObject var model: InstructionsModel
+    var agentID: String? = nil
+    var availableAgentIDs: Set<String>? = nil
+    var compact = false
+    private var visibleTargets: [InstructionTarget] {
+        model.targets.filter { (agentID == nil || $0.id == agentID) && (availableAgentIDs?.contains($0.id) ?? true) }
+    }
     @Environment(\.panelPresentation) private var presentation
     @State private var openSetID: String?
     @State private var editingName = ""
     @FocusState private var nameFocused: Bool
 
     var body: some View {
+        Group {
+            if compact {
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        ScrollView { content.padding(T.s2) }.scrollBounceBehavior(.basedOnSize)
+                        Hairline()
+                        HStack(spacing: T.s2) {
+                            draftSaveButton
+                            Spacer(minLength: 0)
+                            Button(L10n.t("Review changes")) {
+                                if model.isDirty { model.saveNow() }
+                                guard !model.isDirty else { return }
+                                model.expanded.formUnion(visibleTargets.map(\.id))
+                                proxy.scrollTo("rule-targets", anchor: .top)
+                            }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(visibleTargets.isEmpty)
+                            Button(L10n.t("Apply changes")) { model.writeAll(targetIDs: Set(visibleTargets.map(\.id))) }
+                                .buttonStyle(PillButtonStyle(kind: .primary))
+                                .disabled(model.isDirty || !visibleTargets.contains(where: { model.isPending($0.id) }))
+                        }.padding(.horizontal, T.s3).frame(height: T.rowDouble + 8)
+                    }
+                }
+            } else { content }
+        }
+        .onAppear {
+            model.loadIfNeeded()
+            if (compact || model.editorFocusRequest > 0) && openSetID == nil { openSetID = model.activeSetID; editingName = model.activeSetName }
+        }
+        .onChange(of: model.activeSetID) { _, id in
+            if compact || openSetID != nil { openSetID = id; editingName = model.activeSetName }
+        }
+        .onChange(of: model.editorFocusRequest) { _, _ in openSetID = model.activeSetID; editingName = model.activeSetName }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("Shared rules"))
+                .overlay(alignment: .trailing) { if compact { newSetButton.padding(.trailing, T.s3) } }
             Card {
                 ForEach(Array(model.sets.enumerated()), id: \.element.id) { index, set in
                     setSection(set)
@@ -27,66 +68,66 @@ struct InstructionsView: View {
                     Hairline()
                     deleteConfirm
                 }
-                Hairline()
-                HStack(spacing: T.s2) {
-                    newSetButton
-                    Spacer(minLength: T.s2)
-                    if model.isDirty {
-                        HStack(spacing: 5) {
-                            Circle().fill(T.amber).frame(width: 5, height: 5)
-                            Text(L10n.t("Unsaved changes")).font(T.micro).foregroundStyle(T.muted)
+                if !compact {
+                    Hairline()
+                    HStack(spacing: T.s2) {
+                        newSetButton
+                        Spacer(minLength: T.s2)
+                        if model.isDirty {
+                            HStack(spacing: 5) {
+                                Circle().fill(T.amber).frame(width: 5, height: 5)
+                                Text(L10n.t("Unsaved changes")).font(T.micro).foregroundStyle(T.muted)
+                            }
+                        } else {
+                            Text("Markdown").font(T.micro).foregroundStyle(T.muted)
                         }
-                    } else {
-                        Text("Markdown").font(T.micro).foregroundStyle(T.faint)
+                        draftSaveButton
                     }
-                    Button { model.saveNow() } label: {
-                        ShortcutLabel(title: model.isDirty ? L10n.t("Save draft") : L10n.t("Draft saved"), glyph: "⌘S")
-                    }
-                        .buttonStyle(PillButtonStyle(kind: model.isDirty ? .primary : .secondary))
-                        .disabled(!model.isDirty)
-                        .keyboardShortcut("s", modifiers: .command)
+                    .padding(.horizontal, T.s3)
+                    .frame(height: T.rowDouble)
                 }
-                .padding(.horizontal, T.s3)
-                .frame(height: T.rowDouble)
             }
 
-            Text(L10n.t("Saving keeps a local draft. Apply writes the preview; turning a target off previews removal."))
-                .font(T.small).foregroundStyle(T.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, T.s3)
+            if !compact {
+                Text(L10n.t("Saving keeps a local draft. Apply writes the preview; turning a target off previews removal."))
+                    .font(T.small).foregroundStyle(T.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, T.s3)
+            }
 
-            SectionTitle(text: L10n.t("Agents"), count: model.targets.count)
+            SectionTitle(text: L10n.t("Agents"), count: visibleTargets.count)
+                .id("rule-targets")
                 .overlay(alignment: .trailing) {
-                    if model.targets.contains(where: { model.isPending($0.id) }) {
+                    if !compact && visibleTargets.contains(where: { model.isPending($0.id) }) {
                         Button(L10n.t("Review changes")) {
-                            model.expanded.formUnion(model.targets.filter { model.isPending($0.id) }.map(\.id))
+                            model.expanded.formUnion(visibleTargets.filter { model.isPending($0.id) }.map(\.id))
                         }
                             .buttonStyle(PillButtonStyle(kind: .primary))
                             .padding(.trailing, T.s3)
                     }
                 }
 
-            if model.targets.isEmpty {
+            if visibleTargets.isEmpty {
                 EmptyState(
                     title: L10n.t("No agents found"),
                     message: L10n.t("Agents that keep a user-level rules file show up here"))
             } else {
                 Card {
-                    ForEach(Array(model.targets.enumerated()), id: \.element.id) { index, target in
-                        AgentRow(model: model, target: target)
-                        if index < model.targets.count - 1 {
+                    ForEach(Array(visibleTargets.enumerated()), id: \.element.id) { index, target in
+                        AgentRow(model: model, target: target, compact: compact)
+                        if index < visibleTargets.count - 1 {
                             Hairline().padding(.leading, T.s3 + 18 + T.s2)
                         }
                     }
                 }
             }
 
-            if model.targets.contains(where: { model.isPending($0.id) }) {
+            if !compact && visibleTargets.contains(where: { model.isPending($0.id) }) {
                 HStack {
-                    Text(L10n.t("%d agents pending", model.targets.filter { model.isPending($0.id) }.count))
+                    Text(L10n.t("%d agents pending", visibleTargets.filter { model.isPending($0.id) }.count))
                         .font(T.small).foregroundStyle(T.muted)
                     Spacer()
-                    Button(L10n.t("Apply changes")) { model.writeAll() }
+                    Button(L10n.t("Apply changes")) { model.writeAll(targetIDs: Set(visibleTargets.map(\.id))) }
                         .buttonStyle(PillButtonStyle(kind: .primary))
                         .disabled(model.isDirty)
                 }
@@ -100,7 +141,15 @@ struct InstructionsView: View {
                 Text(error).font(T.micro).foregroundStyle(T.red).padding(.horizontal, T.s3)
             }
         }
-        .onAppear { model.loadIfNeeded() }
+    }
+
+    private var draftSaveButton: some View {
+        Button { model.saveNow() } label: {
+            SaveStateLabel(title: model.isDirty ? L10n.t("Save draft") : L10n.t("Draft saved"),
+                           glyph: "⌘S", isSaved: !model.isDirty && model.errorMessage == nil)
+        }
+        .buttonStyle(PillButtonStyle(kind: compact ? .quiet : (model.isDirty ? .primary : .secondary)))
+        .disabled(!model.isDirty).keyboardShortcut("s", modifiers: .command)
     }
 
     // MARK: 套
@@ -123,7 +172,7 @@ struct InstructionsView: View {
                     .overlay(alignment: .topLeading) {
                         if model.draft.isEmpty {
                             Text(L10n.t("Write the rules every agent should read, in Markdown…"))
-                                .font(T.mono).foregroundStyle(T.faint)
+                                .font(T.mono).foregroundStyle(T.muted)
                                 .padding(.horizontal, 11).padding(.vertical, 9)
                                 .allowsHitTesting(false)
                         }
@@ -132,12 +181,14 @@ struct InstructionsView: View {
                         .strokeBorder(T.line, lineWidth: 0.5))
                     .padding(.horizontal, T.s3)
                     .padding(.top, T.s1)
-                Text(L10n.t("Only the text between the two marker lines is written; the rest of each file stays yours."))
-                    .font(T.micro)
-                    .foregroundStyle(T.faint)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, T.s3)
-                    .padding(.vertical, T.s1)
+                if !compact {
+                    Text(L10n.t("Only the text between the two marker lines is written; the rest of each file stays yours."))
+                        .font(T.micro)
+                        .foregroundStyle(T.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, T.s3)
+                        .padding(.vertical, T.s1)
+                }
             }
         }
     }
@@ -149,17 +200,17 @@ struct InstructionsView: View {
                 HStack(spacing: T.s2) {
                     Image(systemName: active ? "largecircle.fill.circle" : "circle")
                         .font(T.glyph)
-                        .foregroundStyle(active ? T.accent : T.faint)
+                        .foregroundStyle(active ? T.accent : T.ctlFg)
                         .frame(width: 16)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(name(of: set))
                             .font(T.body)
                             .foregroundStyle(active ? T.fg : T.fg2)
                             .lineLimit(1)
-                        if !preview.isEmpty {
+                        if !preview.isEmpty && !(compact && open) {
                             Text(preview)
                                 .font(T.micro)
-                                .foregroundStyle(T.faint)
+                                .foregroundStyle(T.muted)
                                 .lineLimit(1)
                         }
                     }
@@ -172,7 +223,7 @@ struct InstructionsView: View {
             Button { toggle(set) } label: {
                 Image(systemName: open ? "chevron.down" : "chevron.right")
                     .font(T.glyph)
-                    .foregroundStyle(T.faint)
+                    .foregroundStyle(T.muted)
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
@@ -257,6 +308,10 @@ struct InstructionsView: View {
     /// 管理窗口提供更大的编辑区；菜单栏面板保持紧凑。
     private var editorHeight: CGFloat {
         let lines = model.draft.split(separator: "\n", omittingEmptySubsequences: false).count
+        if compact {
+            let limit = max(80, 160 - CGFloat(min(4, visibleTargets.count)) * 20)
+            return min(max(80, CGFloat(lines) * 17 + 16), limit)
+        }
         return presentation == .window
             ? min(max(320, CGFloat(lines) * 19 + 26), 520)
             : min(max(160, CGFloat(lines) * 17 + 26), 180)
@@ -310,6 +365,7 @@ struct InstructionsView: View {
 private struct AgentRow: View {
     @ObservedObject var model: InstructionsModel
     let target: InstructionTarget
+    var compact = false
     @State private var previewMode: PreviewMode = .diff
     @State private var showsFullPreview = false
     @Environment(\.panelPresentation) private var presentation
@@ -329,14 +385,17 @@ private struct AgentRow: View {
                     .opacity(on ? 1 : 0.5)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(target.name).font(T.body).foregroundStyle(on ? T.fg : T.fg2).lineLimit(1)
-                    Text(target.abbreviatedPath)
-                        .font(T.monoMicro)
-                        .foregroundStyle(T.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(target.redirectedFrom.map {
-                            L10n.t("This file overrides %@", ($0 as NSString).abbreviatingWithTildeInPath)
-                        } ?? target.path)
+                        .help(target.abbreviatedPath)
+                    if !compact {
+                        Text(target.abbreviatedPath)
+                            .font(T.monoMicro)
+                            .foregroundStyle(T.muted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(target.redirectedFrom.map {
+                                L10n.t("This file overrides %@", ($0 as NSString).abbreviatingWithTildeInPath)
+                            } ?? target.path)
+                    }
                 }
                 Spacer(minLength: T.s2)
                 if !statusLabel.isEmpty {
@@ -350,7 +409,7 @@ private struct AgentRow: View {
                 } label: {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(T.glyph)
-                        .foregroundStyle(T.faint)
+                        .foregroundStyle(T.muted)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -361,7 +420,7 @@ private struct AgentRow: View {
                     .opacity(target.installed ? 1 : 0.4)
             }
             .padding(.horizontal, T.s3)
-            .frame(minHeight: T.rowDouble + 2)
+            .frame(minHeight: compact ? T.rowCompact : T.rowDouble + 2)
 
             if expanded { preview }
         }
@@ -370,6 +429,9 @@ private struct AgentRow: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: T.s2) {
+            if compact {
+                Text(target.abbreviatedPath).font(T.monoMicro).foregroundStyle(T.muted).lineLimit(1).truncationMode(.middle)
+            }
             Text(L10n.t("Own %d lines stay untouched", plan?.ownLineCount ?? 0))
                 .font(T.micro)
                 .foregroundStyle(T.muted)
@@ -396,11 +458,13 @@ private struct AgentRow: View {
                         mode == .diff ? L10n.t("Show changes") : L10n.t("Show the whole file")
                     }
                     .frame(width: 168)
-                    Text(detail(plan)).font(T.micro).foregroundStyle(T.faint).lineLimit(1)
+                    Text(detail(plan)).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
                     Spacer(minLength: T.s2)
-                    Button(L10n.t("Apply")) { model.write(target) }
-                        .buttonStyle(PillButtonStyle(kind: .secondary))
-                        .disabled(!target.installed || !model.isPending(target.id) || model.isDirty)
+                    if !compact {
+                        Button(L10n.t("Apply")) { model.write(target) }
+                            .buttonStyle(PillButtonStyle(kind: .secondary))
+                            .disabled(!target.installed || !model.isPending(target.id) || model.isDirty)
+                    }
                 }
             }
             backupRow
@@ -415,7 +479,7 @@ private struct AgentRow: View {
             HStack(spacing: T.s2) {
                 Text(L10n.t("Backup from %@", latest.createdAt.formatted(date: .abbreviated, time: .shortened)))
                     .font(T.micro)
-                    .foregroundStyle(T.faint)
+                    .foregroundStyle(T.muted)
                     .lineLimit(1)
                 Spacer(minLength: T.s2)
                 IconButton(

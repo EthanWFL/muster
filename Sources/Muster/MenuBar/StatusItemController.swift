@@ -66,6 +66,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     @objc private func openManagement() {
         closeIfShown()
+        model.showsSettings = false
         management.open()
     }
 

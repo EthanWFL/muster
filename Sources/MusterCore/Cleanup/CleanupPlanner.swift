@@ -13,18 +13,25 @@ public struct CleanupPlanner: Sendable {
 
     public func plan(
         sessions: [Session], snapshot: ProcessSnapshot, ports: [ListeningPort],
-        orphans: [OrphanCandidate] = [], worktrees: [WorktreeInfo] = []
+        orphans: [OrphanCandidate] = [], worktrees: [WorktreeInfo] = [], agentIDs: Set<String>? = nil
     ) -> CleanupPlan {
+        if agentIDs?.isEmpty == true { return CleanupPlan(createdAt: snapshot.takenAt, items: []) }
         var items: [CleanupItem] = []
         var planned: Set<Int32> = []
 
         // 1. 监听端口：按 pid 合并
         let byPID = Dictionary(grouping: ports, by: \.pid)
         for pid in byPID.keys.sorted() {
+            // A hidden Agent's actual process tree takes precedence over cwd/name scores,
+            // including the case where two Agent kinds happen to use the same session id.
+            if let agentIDs, sessions.contains(where: {
+                !agentIDs.contains($0.agent.rawValue) && (snapshot.rootRecord(for: $0)?.pid == pid || snapshot.isInTree(of: $0, pid: pid))
+            }) { continue }
             guard isCandidatePID(pid), let record = snapshot.processes[pid], let identity = record.identity,
                   let score = heuristic.bestOwner(pid: pid, sessions: sessions, snapshot: snapshot),
                   score.points >= heuristic.weights.displayFloor,
-                  let session = sessions.first(where: { $0.id == score.sessionID }) else { continue }
+                  let session = sessions.first(where: { $0.id == score.sessionID }),
+                  agentIDs?.contains(session.agent.rawValue) ?? true else { continue }
             let portNumbers = Array(Set(byPID[pid]!.map(\.port))).sorted()
             let target = ProcessTarget(
                 identity: identity, name: record.name, commandLine: snapshot.commandLines[pid],
@@ -41,7 +48,8 @@ public struct CleanupPlanner: Sendable {
                   startTimesMatch(record.startTime, orphan.identity.startTime, tolerance: heuristic.weights.startTimeTolerance),
                   let score = heuristic.bestOwner(
                     pid: pid, sessions: sessions, snapshot: snapshot, formerlyOwnedBy: orphan.formerSessionID),
-                  let session = sessions.first(where: { $0.id == orphan.formerSessionID }) else { continue }
+                  let session = sessions.first(where: { $0.id == orphan.formerSessionID }),
+                  agentIDs?.contains(session.agent.rawValue) ?? true else { continue }
             let target = ProcessTarget(
                 identity: orphan.identity, name: record.name, commandLine: snapshot.commandLines[pid],
                 kind: .orphan, sessionID: session.id, ports: [], score: score,

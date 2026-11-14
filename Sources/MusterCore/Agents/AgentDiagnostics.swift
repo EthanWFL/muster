@@ -16,22 +16,17 @@ public struct AgentDiagnostic: Identifiable, Sendable {
 
 public enum AgentDiagnostics {
     /// Inspects known paths only. Does not launch agents, open authentication files or contact providers.
-    public static func scan(home: String = NSHomeDirectory(), environment: [String: String] = ProcessInfo.processInfo.environment) -> [AgentDiagnostic] {
+    public static func scan(home: String = NSHomeDirectory(), environment: [String: String] = ProcessInfo.processInfo.environment,
+                            agentIDs: Set<String>? = nil) -> [AgentDiagnostic] {
         let fm = FileManager.default
         let targets = InstructionTargets.detect(home: home, environment: environment)
-        let directories = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-            + [home + "/.local/bin", home + "/.npm-global/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+        let directories = AgentInstallation.searchDirectories(home: home, environment: environment)
         func fileState(_ path: String) -> DiagnosticFileState {
             guard fm.fileExists(atPath: path) else { return .missing }
             return fm.isReadableFile(atPath: path) ? .readable : .unreadable
         }
-        return AgentRegistry.all.map { agent in
-            let executable = agent.executables.lazy.flatMap { name in
-                directories.filter { $0.hasPrefix("/") }.map { $0 + "/" + name }
-            }.first { path in
-                var directory: ObjCBool = false
-                return fm.fileExists(atPath: path, isDirectory: &directory) && !directory.boolValue && fm.isExecutableFile(atPath: path)
-            }
+        return AgentRegistry.all.filter { agentIDs?.contains($0.id) ?? true }.map { agent in
+            let executable = AgentInstallation.executablePath(for: agent, directories: directories)
             let config = agent.configuration?.resolve(home: home, environment: environment)
             var configState = config.map(fileState)
             if let config, configState == .readable, agent.editableConfiguration {

@@ -20,6 +20,7 @@ struct SessionLibraryView: View {
                         ProgressView().controlSize(.small)
                         Text(L10n.t("Importing history…")).font(T.small)
                         Button(L10n.t("Cancel")) { library.cancelImport() }
+                            .buttonStyle(PillButtonStyle(kind: .secondary))
                     } else {
                         Text(L10n.t("Saved locally in Muster")).font(T.small).foregroundStyle(T.muted)
                     }
@@ -56,30 +57,38 @@ struct SessionLibraryView: View {
 
     private var toolbar: some View {
         HStack(spacing: T.s2) {
-            Picker(L10n.t("Session scope"), selection: $library.scope) {
-                Text(L10n.t("Recent")).tag(SessionLibraryScope.recent)
-                Text(L10n.t("History")).tag(SessionLibraryScope.history)
-            }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 160)
+            SegmentedControl(items: SessionLibraryScope.allCases, selection: $library.scope,
+                             label: { L10n.t($0 == .recent ? "Recent" : "History") })
+                .frame(width: 160)
+                .accessibilityLabel(L10n.t("Session scope"))
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(T.muted)
                 TextField(L10n.t("Search titles, projects, notes…"), text: $model.sessionSearch)
-                    .textFieldStyle(.plain).focused($searchFocused)
+                    .textFieldStyle(.plain).font(T.body).foregroundStyle(T.fg).focused($searchFocused)
                     .onSubmit { if let first = library.entries(query: model.sessionSearch).first { library.select(first.id) } }
                 if !model.sessionSearch.isEmpty {
                     IconButton(symbol: "xmark.circle.fill", label: L10n.t("Clear search"), tint: T.muted) { model.sessionSearch = "" }
                 }
             }
-            .padding(T.s2).background(RoundedRectangle(cornerRadius: T.r).fill(T.card))
+            .padding(.horizontal, T.s2).frame(height: T.controlHeight + 4)
+            .background(RoundedRectangle(cornerRadius: T.r).fill(T.card))
+            .overlay(RoundedRectangle(cornerRadius: T.r)
+                .strokeBorder(searchFocused ? T.accent : T.line, lineWidth: 0.5))
             Menu {
                 Button(L10n.t("Import last 30 days")) { library.importHistory(days: 30) }
                 Button(L10n.t("Import all history")) { library.importHistory(days: nil) }
                 Divider()
                 Button(L10n.t("Rescan open sessions")) { model.refreshSessions() }
-            } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(model.isRefreshingSessions)
+            } label: {
+                ActivitySymbol(symbol: "arrow.clockwise", isActive: library.isImporting || model.isRefreshingSessions)
+                    .font(T.seg).foregroundStyle(T.ctlFg)
+                    .frame(width: T.iconHitSize, height: T.iconHitSize)
+            }
             .menuStyle(.borderlessButton).fixedSize().disabled(library.isImporting)
             .help(L10n.t("Import session history"))
             .accessibilityLabel(L10n.t("Import session history"))
+            .accessibilityValue(library.isImporting || model.isRefreshingSessions ? L10n.t("Working…") : "")
             IconButton(symbol: "arrow.uturn.backward", label: L10n.t("Undo organization change"), tint: T.ctlFg) { library.undo() }
                 .disabled(!library.canUndo)
                 .help(library.snapshot.lastChange.map { L10n.t("Undo") + ": " + L10n.t($0.kind.rawValue) } ?? L10n.t("No changes to undo"))
@@ -99,7 +108,8 @@ struct SessionLibraryView: View {
             }
             Divider()
             Button(L10n.t("Manage categories…")) { showsCategories = true }
-        } label: { Label(filterTitle, systemImage: "line.3.horizontal.decrease.circle") }
+        } label: { CompactMenuLabel(title: filterTitle, symbol: "line.3.horizontal.decrease.circle") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
         .fixedSize()
     }
 
@@ -131,7 +141,7 @@ struct SessionLibraryView: View {
                 }
             }
             Button(L10n.t("Manage categories…")) { showsCategories = true }
-                .buttonStyle(.plain).font(T.small).foregroundStyle(T.muted).padding(T.s2)
+                .buttonStyle(PillButtonStyle(kind: .quiet)).padding(T.s2)
         }
         .padding(T.s2).frame(width: 176)
     }
@@ -147,7 +157,7 @@ struct SessionLibraryView: View {
             .font(T.small).padding(T.s2)
             .background(RoundedRectangle(cornerRadius: T.r).fill(library.filter == filter ? T.accentSoft : .clear))
         }
-        .buttonStyle(.plain).help(title)
+        .buttonStyle(InteractivePlainButtonStyle(pressedScale: 1)).help(title)
         .accessibilityAddTraits(library.filter == filter ? .isSelected : [])
     }
 
@@ -163,6 +173,7 @@ struct SessionLibraryView: View {
                     Button(L10n.t("Show all history")) {
                         library.scope = .history; library.filter = .all; model.sessionSearch = ""
                     }
+                    .buttonStyle(PillButtonStyle(kind: .secondary))
                     Spacer()
                 }.frame(maxWidth: .infinity)
             } else {
@@ -199,7 +210,7 @@ struct SessionLibraryView: View {
             Text(value).textSelection(.enabled)
             Spacer(minLength: 0)
         }
-        .font(T.small).foregroundStyle(error ? Color.orange : T.muted)
+        .font(T.small).foregroundStyle(error ? T.red : T.muted)
         .padding(T.s2).frame(maxWidth: .infinity, alignment: .leading)
         .background(T.card)
     }
@@ -214,7 +225,7 @@ private struct SessionLibraryRow: View {
                 Text(entry.displayTitle).font(T.section).lineLimit(1)
                 Spacer(minLength: 0)
                 if entry.annotation.needsAttention {
-                    Image(systemName: "flag.fill").foregroundStyle(.orange).help(L10n.t("Needs attention"))
+                    Image(systemName: "flag.fill").foregroundStyle(T.amber).help(L10n.t("Needs attention"))
                 }
             }
             Text(entry.session.cwd.isEmpty ? L10n.t("Unknown project") : (entry.session.cwd as NSString).abbreviatingWithTildeInPath)
@@ -255,11 +266,17 @@ private struct SessionLibraryDetail: View {
                     if entry.stored != nil {
                         Hairline()
                         HStack {
-                            Text(L10n.t(library.dirty ? "Unsaved changes" : "Saved locally")).font(T.small).foregroundStyle(T.muted)
+                            Text(L10n.t(library.isSaving ? "Saving…" : (library.dirty ? "Unsaved changes" : "Saved locally")))
+                                .font(T.small).foregroundStyle(T.muted)
                             Spacer()
-                            Button(L10n.t("Discard")) { library.reloadDraft() }.disabled(!library.dirty || library.isSaving)
-                            Button(L10n.t("Save")) { library.save() }
-                                .buttonStyle(.borderedProminent).disabled(!library.dirty || library.isSaving)
+                            Button(L10n.t("Discard")) { library.reloadDraft() }
+                                .buttonStyle(PillButtonStyle(kind: .quiet)).disabled(!library.dirty || library.isSaving)
+                            Button { library.save() } label: {
+                                SaveStateLabel(title: L10n.t(library.isSaving ? "Saving…" : (library.dirty ? "Save" : "Saved")),
+                                               glyph: "⌘S", isSaved: !library.dirty && !library.isSaving)
+                            }
+                                .buttonStyle(PillButtonStyle(kind: library.dirty ? .primary : .secondary))
+                                .disabled(!library.dirty || library.isSaving)
                                 .keyboardShortcut("s", modifiers: .command)
                         }.padding(T.s3)
                     }
@@ -286,7 +303,7 @@ private struct SessionLibraryDetail: View {
                 if entry.session.isProcessAlive || entry.session.resumeCommand != nil {
                     Button { model.continueSession(entry.session) } label: {
                         Label(L10n.t(entry.session.isProcessAlive ? "Focus terminal" : "Continue in Terminal"), systemImage: "terminal")
-                    }.disabled(model.resumingSessionKey != nil)
+                    }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.resumingSessionKey != nil)
                 }
                 if entry.session.resumeCommand != nil {
                     IconButton(symbol: "doc.on.doc", label: L10n.t("Copy resume command"), tint: T.ctlFg) { model.copyResume(entry.session) }
@@ -299,16 +316,18 @@ private struct SessionLibraryDetail: View {
         VStack(alignment: .leading, spacing: T.s3) {
             field(L10n.t("Title")) {
                 TextField(entry.displayTitle, text: $library.draft.title).textFieldStyle(.roundedBorder).focused($titleFocused)
+                    .font(T.body).controlSize(.small).frame(minHeight: T.controlHeight)
             }
             field(L10n.t("Category")) {
-                Picker(L10n.t("Category"), selection: $library.draft.categoryID) {
-                    Text(L10n.t("Uncategorized")).tag(UUID?.none)
-                    ForEach(library.snapshot.categories) { category in Text(category.name).tag(Optional(category.id)) }
-                }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                InlineSelect(items: [UUID?.none] + library.snapshot.categories.map { Optional($0.id) },
+                             label: { id in library.snapshot.categories.first { $0.id == id }?.name ?? L10n.t("Uncategorized") },
+                             header: L10n.t("Category"), selection: $library.draft.categoryID)
             }
             Toggle(L10n.t("Needs attention"), isOn: $library.draft.needsAttention)
+                .font(T.body).controlSize(.small).tint(T.accent)
             field(L10n.t("Notes")) {
                 TextEditor(text: $library.draft.notes).font(T.body).frame(minHeight: 100, maxHeight: 180)
+                    .foregroundStyle(T.fg).scrollContentBackground(.hidden)
                     .padding(4).background(T.card)
                     .overlay(RoundedRectangle(cornerRadius: T.r).strokeBorder(T.line))
                     .accessibilityLabel(L10n.t("Session notes"))
@@ -318,13 +337,14 @@ private struct SessionLibraryDetail: View {
                     Text((path as NSString).abbreviatingWithTildeInPath).font(T.monoMicro)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     HStack {
-                        Button(L10n.t("Open folder")) { library.openDirectory(path) }
-                        Button(L10n.t("Remove association")) { library.draft.artifactDirectory = nil }
+                        Button(L10n.t("Open folder")) { library.openDirectory(path) }.buttonStyle(PillButtonStyle(kind: .secondary))
+                        Button(L10n.t("Remove association")) { library.draft.artifactDirectory = nil }.buttonStyle(PillButtonStyle(kind: .quiet))
                     }
                 } else {
                     Text(L10n.t("Link a folder containing this session's output.")).font(T.small).foregroundStyle(T.muted)
                 }
                 Button(L10n.t("Choose folder")) { library.chooseArtifactDirectory() }
+                    .buttonStyle(PillButtonStyle(kind: .secondary))
             }
         }.disabled(library.isSaving)
     }
@@ -337,6 +357,7 @@ private struct SessionLibraryDetail: View {
                 .font(T.monoMicro).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             if !entry.session.cwd.isEmpty {
                 Button(L10n.t("Open project folder")) { library.openDirectory(entry.session.cwd) }
+                    .buttonStyle(PillButtonStyle(kind: .secondary))
             }
             Text(entry.session.id).font(T.monoMicro).textSelection(.enabled)
             HStack {
@@ -365,8 +386,9 @@ private struct SessionCategoriesView: View {
         VStack(alignment: .leading, spacing: T.s3) {
             Text(L10n.t("Manage categories")).font(.title2)
             HStack {
-                TextField(L10n.t("New category name"), text: $newName).textFieldStyle(.roundedBorder)
+                TextField(L10n.t("New category name"), text: $newName).textFieldStyle(.roundedBorder).font(T.body).controlSize(.small)
                 Button(L10n.t("Create")) { library.createCategory(newName) }
+                    .buttonStyle(PillButtonStyle(kind: .primary))
                     .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || library.isSaving)
             }
             ScrollView {
@@ -377,8 +399,11 @@ private struct SessionCategoriesView: View {
                 }
             }.frame(minHeight: 160, maxHeight: 340)
             if library.dirty { Text(L10n.t("Save or discard session changes before deleting a category.")).font(T.small).foregroundStyle(T.muted) }
-            if let error = library.errorMessage { Text(error).font(T.small).foregroundStyle(.orange) }
-            HStack { Spacer(); Button(L10n.t("Done")) { dismiss() }.keyboardShortcut(.cancelAction) }
+            if let error = library.errorMessage { Text(error).font(T.small).foregroundStyle(T.red) }
+            HStack {
+                Spacer()
+                Button(L10n.t("Done")) { dismiss() }.buttonStyle(PillButtonStyle(kind: .secondary)).keyboardShortcut(.cancelAction)
+            }
         }
         .padding(T.s4).frame(width: 460)
         .alert(L10n.t("Delete category?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { category in
@@ -401,8 +426,9 @@ private struct SessionCategoryEditor: View {
     var body: some View {
         HStack {
             Image(systemName: "folder").foregroundStyle(T.muted)
-            TextField(L10n.t("Category name"), text: $name).textFieldStyle(.roundedBorder)
-            Button(L10n.t("Rename")) { library.renameCategory(category, name) }.disabled(name == category.name || library.isSaving)
+            TextField(L10n.t("Category name"), text: $name).textFieldStyle(.roundedBorder).font(T.body).controlSize(.small)
+            Button(L10n.t("Rename")) { library.renameCategory(category, name) }
+                .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(name == category.name || library.isSaving)
             IconButton(symbol: "trash", label: L10n.t("Delete category"), tint: T.muted, action: onDelete)
                 .disabled(library.isSaving || library.dirty)
         }

@@ -3,8 +3,72 @@ import SwiftUI
 
 struct ConfigurationView: View {
     @ObservedObject var model: ConfigurationModel
+    var showsAgentPicker = true
+    var compact = false
+    @State private var confirmsRestore = false
+    @State private var confirmsReload = false
 
     var body: some View {
+        Group {
+            if compact {
+                VStack(spacing: 0) {
+                    ScrollView { compactContent.padding(T.s2) }.scrollBounceBehavior(.basedOnSize)
+                    if let message = model.errorMessage ?? model.notice {
+                        Text(message).font(T.small).foregroundStyle(model.errorMessage == nil ? T.muted : T.red)
+                            .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, T.s3).padding(.vertical, T.s2).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Hairline()
+                    if model.selected?.editable == true, model.snapshot != nil {
+                        actionBar.padding(.vertical, T.s1)
+                    } else if model.selected != nil {
+                        HStack {
+                            Text(L10n.t("File access only")).font(T.small).foregroundStyle(T.muted)
+                            Spacer()
+                            Button(L10n.t("Open file")) { model.openFile() }.buttonStyle(PillButtonStyle(kind: .primary))
+                        }.padding(.horizontal, T.s3).frame(height: T.rowDouble + 8)
+                    }
+                }
+            } else { standardContent }
+        }
+        .onAppear { model.loadIfNeeded() }
+        .alert(L10n.t("Discard unsaved changes?"), isPresented: $confirmsReload) {
+            Button(L10n.t("Discard"), role: .destructive) { model.reload() }
+            Button(L10n.t("Cancel"), role: .cancel) {}
+        }
+        .alert(L10n.t("Restore the configuration before the last Muster save?"), isPresented: $confirmsRestore) {
+            Button(L10n.t("Restore previous"), role: .destructive) { model.restore() }
+            Button(L10n.t("Cancel"), role: .cancel) {}
+        }
+    }
+
+    private var compactContent: some View {
+        VStack(alignment: .leading, spacing: T.s2) {
+            if let selected = model.selected {
+                if selected.editable, let snapshot = model.snapshot {
+                    HStack {
+                        SectionTitle(text: L10n.t("Default model"))
+                        if !model.presets.isEmpty {
+                            Menu {
+                                ForEach(model.presets) { preset in
+                                    Button(preset.name + " · " + preset.model) { model.usePreset(preset) }
+                                }
+                            } label: { CompactMenuLabel(title: L10n.t("Use preset")) }
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                            .disabled(model.dirty).padding(.trailing, T.s3)
+                        }
+                    }
+                    modelCard(selected, snapshot)
+                    Text(L10n.t("Saved defaults apply to new Agent sessions."))
+                        .font(T.small).foregroundStyle(T.muted).padding(.horizontal, T.s3)
+                    DisclosureGroup(L10n.t("Configuration file")) { fileCard(selected).padding(.top, T.s2) }
+                        .font(T.small).foregroundStyle(T.muted).padding(T.s3)
+                } else { fileCard(selected) }
+            }
+        }
+    }
+
+    private var standardContent: some View {
         VStack(alignment: .leading, spacing: T.s2) {
             SectionTitle(text: L10n.t("Agent configuration"))
             if let selected = model.selected {
@@ -33,15 +97,6 @@ struct ConfigurationView: View {
             if let error = model.errorMessage {
                 Text(error).font(T.micro).foregroundStyle(T.red).padding(.horizontal, T.s3)
             }
-        }
-        .onAppear { model.loadIfNeeded() }
-        .alert(L10n.t("Discard unsaved changes?"), isPresented: $model.confirmingReload) {
-            Button(L10n.t("Discard"), role: .destructive) { model.reload() }
-            Button(L10n.t("Cancel"), role: .cancel) {}
-        }
-        .alert(L10n.t("Restore the configuration before the last Muster save?"), isPresented: $model.confirmingRestore) {
-            Button(L10n.t("Restore previous"), role: .destructive) { model.restore() }
-            Button(L10n.t("Cancel"), role: .cancel) {}
         }
     }
 
@@ -81,12 +136,14 @@ struct ConfigurationView: View {
     private func header(_ selected: AgentConfiguration) -> some View {
         HStack(spacing: T.s2) {
             AgentLogo(agentID: selected.id, mark: selected.id == "pi" ? "π" : String(selected.name.prefix(1)))
-            InlineSelect(items: model.targets, label: { $0.name },
+            if showsAgentPicker {
+                InlineSelect(items: model.targets, label: { $0.name },
                          selection: Binding(get: { selected }, set: { model.select($0) }))
                 .disabled(model.dirty)
+            } else { Text(selected.name).font(T.body) }
             Spacer()
             IconButton(symbol: "arrow.clockwise", label: L10n.t("Reload")) {
-                if model.dirty { model.confirmingReload = true } else { model.reload() }
+                if model.dirty { confirmsReload = true } else { model.reload() }
             }
         }
         .padding(.horizontal, T.s3)
@@ -104,11 +161,11 @@ struct ConfigurationView: View {
                         .textSelection(.enabled)
                         .help(selected.path)
                     if let info = model.fileInfo {
-                        Text(info).font(T.micro).foregroundStyle(T.faint).lineLimit(1)
+                        Text(info).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                IconButton(symbol: "doc.text", label: L10n.t("Open file")) { model.openFile() }
+                if !compact { IconButton(symbol: "doc.text", label: L10n.t("Open file")) { model.openFile() } }
                 IconButton(symbol: "folder", label: L10n.t("Show in Finder")) { model.revealFile() }
             }
             .padding(.horizontal, T.s3)
@@ -120,8 +177,10 @@ struct ConfigurationView: View {
                         .font(T.small).foregroundStyle(T.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: T.s2)
+                    if !compact {
                     Button(L10n.t("Open file")) { model.openFile() }
                         .buttonStyle(PillButtonStyle(kind: .primary))
+                    }
                 }
                 .padding(.horizontal, T.s3)
                 .padding(.vertical, T.s2)
@@ -172,8 +231,7 @@ struct ConfigurationView: View {
                     .padding(.horizontal, T.s3)
                     .padding(.vertical, T.s2)
             }
-            Hairline()
-            actionBar
+            if !compact { Hairline(); actionBar }
         }
         .zIndex(1)
     }
@@ -181,19 +239,20 @@ struct ConfigurationView: View {
     /// 左：恢复上次；右：放弃 + 保存。和规则页底栏同一套。
     private var actionBar: some View {
         HStack(spacing: T.s2) {
-            Button(L10n.t("Restore previous")) { model.confirmingRestore = true }
+            Button(L10n.t("Restore previous")) { confirmsRestore = true }
                 .buttonStyle(PillButtonStyle(kind: .quiet))
-                .disabled(!model.canRestore || model.dirty)
+                .disabled(!model.canRestore || model.dirty || !model.canWrite)
             Spacer(minLength: T.s2)
             if model.dirty {
                 Button(L10n.t("Discard")) { model.reload() }
                     .buttonStyle(PillButtonStyle(kind: .quiet))
             }
             Button { model.save() } label: {
-                ShortcutLabel(title: model.dirty ? L10n.t("Save") : L10n.t("Saved"), glyph: "⌘S")
+                SaveStateLabel(title: model.dirty ? L10n.t("Save") : L10n.t("Saved"),
+                               glyph: "⌘S", isSaved: !model.dirty && model.errorMessage == nil)
             }
             .buttonStyle(PillButtonStyle(kind: model.dirty ? .primary : .secondary))
-            .disabled(!model.dirty)
+            .disabled(!model.dirty || !model.canWrite)
             .keyboardShortcut("s", modifiers: .command)
             .help(L10n.t("A private backup is saved before writing."))
         }

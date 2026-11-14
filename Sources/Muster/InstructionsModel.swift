@@ -17,6 +17,8 @@ final class InstructionsModel: ObservableObject {
     /// 编辑中的文本：改完会自动存进当前这套，所以退出 App 也不丢。
     @Published var draft = "" { didSet { if draft != oldValue { scheduleSave() } } }
     @Published var expanded: Set<String> = []
+    @Published private(set) var editorFocusRequest = 0
+    func focusActiveSet() { editorFocusRequest += 1 }
     /// 新建 / 删除确认，同一时间只开一个
     @Published var creatingSet = false
     @Published var setName = ""
@@ -25,6 +27,9 @@ final class InstructionsModel: ObservableObject {
     private let sync: InstructionSync
     private let detectTargets: () -> [InstructionTarget]
     private var saveTask: Task<Void, Never>?
+    private var managedAgentIDs: Set<String>?
+
+    func restrictToAgents(_ ids: Set<String>) { managedAgentIDs = ids }
 
     init(sync: InstructionSync = InstructionSync(),
          detectTargets: @escaping () -> [InstructionTarget] = { InstructionTargets.detect() }) {
@@ -168,7 +173,7 @@ final class InstructionsModel: ObservableObject {
     }
 
     func write(_ target: InstructionTarget) {
-        guard !isDirty, let plan = plans[target.id] else { return }
+        guard !isDirty, managedAgentIDs?.contains(target.id) ?? true, let plan = plans[target.id] else { return }
         do {
             let done = try sync.apply(plan)
             if done.action == .create || done.action == .update {
@@ -185,18 +190,18 @@ final class InstructionsModel: ObservableObject {
         }
     }
 
-    func writeAll() {
+    func writeAll(targetIDs: Set<String>? = nil) {
         guard !isDirty else { return }
-        let written = applyPending()
+        let written = applyPending(targetIDs: targetIDs)
         if written == 0, errorMessage == nil { notice = L10n.t("Nothing to write") }
     }
 
     /// 应用预览中的写入或移除；部分失败会点名，已写成功的保留。
     @discardableResult
-    private func applyPending() -> Int {
+    private func applyPending(targetIDs: Set<String>?) -> Int {
         var written = 0
         var failed: [String] = []
-        for target in targets where isPending(target.id) {
+        for target in targets where isPending(target.id) && (targetIDs?.contains(target.id) ?? true) && (managedAgentIDs?.contains(target.id) ?? true) {
             do {
                 guard let plan = plans[target.id] else { continue }
                 let done = try sync.apply(plan)
@@ -231,6 +236,7 @@ final class InstructionsModel: ObservableObject {
 
     /// 恢复某次备份前，当前文件也会先备份一次，所以这一步同样可撤销。
     func restore(_ backup: InstructionBackup, to target: InstructionTarget) {
+        guard managedAgentIDs?.contains(target.id) ?? true else { return }
         do {
             try sync.restore(backup, to: target)
             if let file = try? String(contentsOfFile: target.path, encoding: .utf8),

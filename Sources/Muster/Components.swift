@@ -9,10 +9,11 @@ struct PillButtonStyle: ButtonStyle {
     let kind: Kind
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
+    @ReducedMotion private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11.5, weight: .medium))
+            .font(T.seg.weight(.medium))
             .padding(.horizontal, 8)
             .frame(height: T.controlHeight)
             .foregroundStyle(foreground)
@@ -25,7 +26,8 @@ struct PillButtonStyle: ButtonStyle {
                 }
             }
             .overlay(Capsule().fill(T.fg.opacity(hovering && isEnabled ? 0.06 : 0)))
-            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(reduceMotion ? nil : InteractionMotion.hover, value: hovering && isEnabled)
+            .modifier(ButtonPressFeedback(isPressed: configuration.isPressed))
             .opacity(isEnabled ? 1 : 0.4)
             .onHover { hovering = $0 }
             .pointerCursor()
@@ -33,7 +35,7 @@ struct PillButtonStyle: ButtonStyle {
 
     private var foreground: Color {
         switch kind {
-        case .primary: return .white
+        case .primary: return T.onAccent
         case .secondary: return T.fg2
         case .quiet: return T.ctlFg
         case .danger: return T.red
@@ -54,20 +56,23 @@ struct PillButtonStyle: ButtonStyle {
 struct IconButton: View {
     let symbol: String
     let label: String
-    var tint: Color = T.faint
+    var tint: Color = T.ctlFg
+    var isBusy = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
+            ActivitySymbol(symbol: symbol, isActive: isBusy)
                 .font(.system(size: 11))
                 .foregroundStyle(tint)
                 .frame(width: T.iconHitSize, height: T.iconHitSize)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(InteractivePlainButtonStyle())
+        .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.90))
         .help(label)
         .accessibilityLabel(label)
+        .accessibilityValue(isBusy ? L10n.t("Working…") : "")
+        .disabled(isBusy)
     }
 }
 
@@ -99,7 +104,7 @@ struct MiniField: View {
             .foregroundStyle(T.fg2)
             .focused($focused)
             .padding(.horizontal, 8)
-            .frame(width: width, height: 24)
+            .frame(width: width, height: T.controlHeight)
             .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
             .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
                 .strokeBorder(focused ? T.accent : T.line, lineWidth: 0.5))
@@ -115,6 +120,8 @@ struct SegmentedControl<Value: Hashable>: View {
     @Binding var selection: Value
     var shortcut: ((Value) -> KeyEquivalent?)? = nil
     let label: (Value) -> String
+    @Namespace private var selectionAnimation
+    @ReducedMotion private var reduceMotion
 
     var body: some View {
         HStack(spacing: 2) {
@@ -122,7 +129,7 @@ struct SegmentedControl<Value: Hashable>: View {
                 let on = selection == item
                 Button { selection = item } label: {
                     Text(label(item))
-                    .font(.system(size: 11.5, weight: on ? .semibold : .regular))
+                    .font(T.seg.weight(on ? .semibold : .regular))
                     .foregroundStyle(on ? T.fg : T.ctlFg)
                     .frame(maxWidth: .infinity, minHeight: T.controlHeight)
                     .background {
@@ -132,18 +139,19 @@ struct SegmentedControl<Value: Hashable>: View {
                                 .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
                                     .strokeBorder(T.line, lineWidth: 0.5))
                                 .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
+                                .matchedGeometryEffect(id: "selection", in: selectionAnimation)
                         }
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(InteractivePlainButtonStyle())
+                .buttonStyle(InteractivePlainButtonStyle(pressedScale: 1))
                 .modifier(OptionalShortcut(key: shortcut?(item)))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.segTrack))
-        .animation(.snappy(duration: 0.18), value: selection)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: selection)
     }
 }
 
@@ -223,8 +231,8 @@ struct SettingsRow<Content: View>: View {
 /// 面板左上角的品牌标：直接播放 `manta-glide.gif`（20fps，3.2s 一轮）。
 /// 开启「减弱动态效果」时停在首帧；深色模式下用 CIColorInvert 把黑色蝠鲼翻成白色。
 struct BrandMark: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var theme = Theme.shared
+    @ReducedMotion private var reduceMotion
+    private let theme = Theme.shared
     var size: CGFloat = 20
 
     var body: some View {
@@ -317,20 +325,32 @@ struct InlineSelect<Item: Hashable>: View {
                 Button(L10n.t("Custom…"), action: customAction)
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(label(selection)).font(T.seg).lineLimit(1)
-                Image(systemName: "chevron.down").font(T.glyph)
-            }
-            .foregroundStyle(T.ctlFg)
-            .padding(.horizontal, 9)
-            .frame(height: T.controlHeight)
-            .background(Capsule().fill(T.pill))
+            CompactMenuLabel(title: label(selection))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(header ?? label(selection))
         .accessibilityValue(label(selection))
+    }
+}
+
+/// Shared menu label; native menus retain focus, scrolling and keyboard navigation.
+struct CompactMenuLabel: View {
+    let title: String
+    var symbol: String? = nil
+
+    var body: some View {
+        HStack(spacing: T.s1) {
+            if let symbol { Image(systemName: symbol).font(T.seg) }
+            Text(title).font(T.seg).lineLimit(1)
+            Image(systemName: "chevron.down").font(T.glyph)
+        }
+        .foregroundStyle(T.ctlFg)
+        .padding(.horizontal, T.s2)
+        .frame(height: T.controlHeight)
+        .background(Capsule().fill(T.pill))
+        .pointerCursor()
     }
 }
 
@@ -375,7 +395,7 @@ struct SectionTitle: View {
                 .tracking(0.4)
                 .foregroundStyle(T.muted)
             if let count {
-                Text("\(count)").font(T.micro).monospacedDigit().foregroundStyle(T.faint)
+                Text("\(count)").font(T.micro).monospacedDigit().foregroundStyle(T.muted)
             }
             Spacer(minLength: 0)
         }
@@ -389,12 +409,14 @@ struct SectionTitle: View {
 struct HoverHighlight: ViewModifier {
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
+    @ReducedMotion private var reduceMotion
 
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: T.r, style: .continuous)
                 .fill(hovering && isEnabled ? T.card2 : .clear))
             .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : InteractionMotion.hover, value: hovering && isEnabled)
     }
 }
 

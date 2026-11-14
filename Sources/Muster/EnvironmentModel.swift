@@ -23,6 +23,8 @@ final class EnvironmentModel: ObservableObject {
     private(set) var reconcileTask: Task<Void, Never>?
     private(set) var executionTask: Task<Void, Never>?
     private var rescanRequested = false
+    private var scopeRevision = 0
+    private var managedAgentIDs: Set<String>?
 
     /// 由 `PanelModel` 注入，避免两边各存一份会话
     var sessionsProvider: @MainActor () -> [Session] = { [] }
@@ -51,6 +53,16 @@ final class EnvironmentModel: ObservableObject {
         scanTask?.cancel()
         reconcileTask?.cancel()
         rescanRequested = false
+    }
+
+    func restrictToAgents(_ ids: Set<String>) {
+        managedAgentIDs = ids
+        detector.restrictToAgents(ids)
+        scopeRevision += 1
+        plan = nil
+        selected = []; confirmed = []; seen = []
+        rescanRequested = isVisible
+        if isVisible, !isScanning, !isBusy { scan() }
     }
 
     // MARK: - 采样
@@ -91,6 +103,8 @@ final class EnvironmentModel: ObservableObject {
         let sessions = sessionsProvider()
         guard full || detector.needsSampling(sessions: sessions) else { return }
         isScanning = true
+        let revision = scopeRevision
+        let ids = managedAgentIDs
         let (runner, table, clock, detector, planner) = (runner, table, clock, detector, planner)
         scanTask = Task { [weak self] in
             let plan = await Task.detached(priority: .utility) { () -> CleanupPlan? in
@@ -99,15 +113,15 @@ final class EnvironmentModel: ObservableObject {
                 detector.observe(snapshot: snapshot, sessions: sessions)
                 guard full else { return nil }
                 let ports = (try? scanner.listeningPorts()) ?? []
-                let projects = Array(Set(sessions.filter { $0.state != .ended }.map(\.cwd).filter { !$0.isEmpty }))
+                let projects = Array(Set(sessions.filter { $0.state != .ended && (ids?.contains($0.agent.rawValue) ?? true) }.map(\.cwd).filter { !$0.isEmpty }))
                 let worktrees = WorktreeScanner(runner: runner).scanAll(projects: projects)
                 return planner.plan(sessions: sessions, snapshot: snapshot, ports: ports,
-                                    orphans: detector.candidates(), worktrees: worktrees)
+                                    orphans: detector.candidates(), worktrees: worktrees, agentIDs: ids)
             }.value
             guard let self else { return }
             isScanning = false
             guard !Task.isCancelled else { return }
-            if let plan { apply(plan) }
+            if revision == scopeRevision, let plan { apply(plan) }
             if rescanRequested {
                 rescanRequested = false
                 scan()

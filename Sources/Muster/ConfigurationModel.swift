@@ -14,8 +14,6 @@ final class ConfigurationModel: ObservableObject {
     /// 本地模型列表之外手填；列表只有一项或没有时视图自己退回手填
     @Published var customEntry = false
     @Published private(set) var fileInfo: String?
-    @Published var confirmingRestore = false
-    @Published var confirmingReload = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var notice: String?
     @Published private(set) var presets: [ConfigurationPreset] = []
@@ -23,6 +21,9 @@ final class ConfigurationModel: ObservableObject {
     private let store: AgentConfigurationStore
     private let presetStore: ConfigurationPresetStore
     private let detectTargets: () -> [AgentConfiguration]
+    @Published private(set) var managedAgentIDs: Set<String>?
+    var canWrite: Bool { selected.map { managedAgentIDs?.contains($0.id) ?? true } ?? false }
+    func restrictToAgents(_ ids: Set<String>) { managedAgentIDs = ids }
 
     init(store: AgentConfigurationStore = AgentConfigurationStore(),
          presetStore: ConfigurationPresetStore = ConfigurationPresetStore(),
@@ -102,6 +103,7 @@ final class ConfigurationModel: ObservableObject {
 
     /// 变更在页内实时以 diff 展示；`store.save` 自己会先校验再写
     func save() {
+        guard canWrite else { errorMessage = L10n.t("Select this Agent in Settings before writing its configuration."); return }
         guard let snapshot else { return }
         do {
             try store.save(snapshot, provider: provider, model: model)
@@ -111,6 +113,7 @@ final class ConfigurationModel: ObservableObject {
     }
 
     func restore() {
+        guard canWrite else { errorMessage = L10n.t("Select this Agent in Settings before writing its configuration."); return }
         guard let snapshot else { return }
         do {
             try store.restore(snapshot)

@@ -4,8 +4,8 @@ import SwiftUI
 struct ManagementSidebar: View {
     @ObservedObject var model: PanelModel
     @ObservedObject private var settings = SettingsStore.shared
-    @ObservedObject private var theme = Theme.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ReducedMotion private var reduceMotion
+    @Namespace private var selectionAnimation
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,7 +17,8 @@ struct ManagementSidebar: View {
                     ForEach(Array(model.orderedTabs.enumerated()), id: \.element) { index, tab in
                         SidebarRow(title: tab.title, symbol: symbol(tab),
                                    selected: !model.showsSettings && model.tab == tab,
-                                   shortcutHint: "⌘\(index + 1)") {
+                                   shortcutHint: "⌘\(index + 1)",
+                                   selectionNamespace: selectionAnimation, selectionID: "workspace") {
                             model.showsSettings = false
                             model.tab = tab
                         }
@@ -35,7 +36,8 @@ struct ManagementSidebar: View {
                     VStack(spacing: 2) {
                         ForEach(SettingsSection.allCases) { section in
                             SidebarRow(title: section.title, symbol: section.symbol,
-                                       selected: model.settingsSection == section, compact: true) {
+                                       selected: model.settingsSection == section, compact: true,
+                                       selectionNamespace: selectionAnimation, selectionID: "settings-anchor") {
                                 model.showSettings(section)
                             }
                         }
@@ -45,7 +47,7 @@ struct ManagementSidebar: View {
                     .padding(.leading, 24).padding(.trailing, T.s3)
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .frame(height: settings.comfortableLayout ? 208 : 188)
+                .frame(height: CGFloat(SettingsSection.allCases.count) * (T.rowSingle + 2) + 8)
                 .padding(.bottom, T.s3)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -60,15 +62,17 @@ struct ManagementSidebar: View {
         .frame(width: 208)
         .frame(maxHeight: .infinity)
         .background(T.bg)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: model.showsSettings)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.showsSettings)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.tab)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.settingsSection)
     }
 
     private func symbol(_ tab: PanelModel.Tab) -> String {
         switch tab {
+        case .projects: return "folder"
         case .sessions: return "bubble.left.and.bubble.right"
         case .environment: return "sparkles"
-        case .instructions: return "text.book.closed"
-        case .configuration: return "slider.horizontal.3"
+        case .agent: return "terminal"
         }
     }
 }
@@ -80,8 +84,11 @@ private struct SidebarRow: View {
     var shortcutHint: String? = nil
     var compact = false
     var pinned = false
+    var selectionNamespace: Namespace.ID? = nil
+    var selectionID = ""
     let action: () -> Void
     @State private var hovered = false
+    @ReducedMotion private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -102,15 +109,28 @@ private struct SidebarRow: View {
             .foregroundStyle(selected ? T.fg : T.fg2)
             .padding(.horizontal, T.s3)
             .frame(height: compact ? T.rowSingle : T.rowSingle + 6)
-            .background(RoundedRectangle(cornerRadius: 9)
-                .fill(selected ? T.fg.opacity(0.07) : ((hovered || pinned) ? T.card2 : .clear)))
+            .background {
+                RoundedRectangle(cornerRadius: 9).fill((hovered || pinned) ? T.card2 : .clear)
+                if selected {
+                    if let selectionNamespace {
+                        selectionBackground.matchedGeometryEffect(id: selectionID, in: selectionNamespace)
+                    } else {
+                        selectionBackground
+                    }
+                }
+            }
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(pinned ? T.line : .clear, lineWidth: 0.5))
             .contentShape(RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(InteractivePlainButtonStyle())
+        .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.99))
         .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : InteractionMotion.hover, value: hovered)
         .help(title + (shortcutHint.map { " · " + $0 } ?? ""))
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var selectionBackground: some View {
+        RoundedRectangle(cornerRadius: 9).fill(T.fg.opacity(0.07))
     }
 }

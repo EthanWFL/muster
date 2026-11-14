@@ -6,10 +6,15 @@ import SwiftUI
 final class SessionLibraryModel: ObservableObject {
     @Published private(set) var snapshot: SessionCatalogSnapshot = .empty
     @Published private(set) var live: [Session] = []
+    @Published var managedAgentIDs: Set<String>? {
+        didSet { if wantsOpen && !didOpen { open() } }
+    }
     @Published var scope: SessionLibraryScope = .recent
     @Published var filter: SessionLibraryFilter = .all
     @Published private(set) var selectedID: String?
-    @Published var draft = SessionAnnotation()
+    @Published var draft = SessionAnnotation() {
+        didSet { if draft != oldValue { notice = nil } }
+    }
     @Published private(set) var editingOriginal: SessionAnnotation?
     @Published private(set) var isSaving = false
     @Published private(set) var isImporting = false
@@ -19,34 +24,40 @@ final class SessionLibraryModel: ObservableObject {
     @Published private(set) var titleFocusRequest = 0
     private var pendingSelection: String?
     private var didOpen = false
+    private var wantsOpen = false
     private let catalog: SessionCatalog
-    private let historyScanner: @Sendable (TimeInterval) throws -> [Session]
+    private let historyScanner: @Sendable (TimeInterval, Set<String>?) throws -> [Session]
     private(set) var loadTask: Task<Void, Never>?
     private(set) var observationTask: Task<Void, Never>?
     private(set) var operationTask: Task<Void, Never>?
     private(set) var importTask: Task<Void, Never>?
 
     init(catalog: SessionCatalog = SessionCatalog(),
-         historyScanner: @escaping @Sendable (TimeInterval) throws -> [Session] = { retention in
-             try AgentRegistry.transcriptScanners(retention: retention).flatMap { try $0.scan() }
-         }) {
+         historyScanner: (@Sendable (TimeInterval) throws -> [Session])? = nil) {
         self.catalog = catalog
-        self.historyScanner = historyScanner
+        self.historyScanner = { retention, ids in
+            if ids?.isEmpty == true { return [] }
+            if let historyScanner { return try historyScanner(retention).filter { ids?.contains($0.agent.rawValue) ?? true } }
+            return try AgentRegistry.transcriptScanners(retention: retention)
+                .filter { ids?.contains($0.agent.rawValue) ?? true }.flatMap { try $0.scan() }
+        }
     }
 
     var dirty: Bool { editingOriginal.map { draft != $0 } ?? false }
-    var pendingCount: Int { snapshot.sessions.filter { $0.annotation.needsAttention }.count }
-    var canUndo: Bool { snapshot.lastChange != nil && !isSaving && !dirty }
+    var pendingCount: Int { snapshot.sessions.filter { $0.annotation.needsAttention && includes($0.agent) }.count }
+    var canUndo: Bool { snapshot.lastChange != nil && !isSaving && !dirty && managedAgentIDs?.isEmpty != true }
     var selected: LibrarySession? {
         guard let selectedID else { return nil }
         let stored = snapshot.sessions.first { $0.id == selectedID }
-        guard let session = live.first(where: { $0.key == selectedID }) ?? stored?.session else { return nil }
+        guard let session = live.first(where: { $0.key == selectedID }) ?? stored?.session, includes(session.agent) else { return nil }
         return LibrarySession(session: session, stored: stored)
     }
 
     func entries(query: String = "", filter override: SessionLibraryFilter? = nil) -> [LibrarySession] {
         SessionLibraryBrowser(scope: scope, filter: override ?? filter, query: query).entries(snapshot: snapshot, live: live)
+            .filter { includes($0.session.agent) }
     }
+    private func includes(_ agent: AgentKind) -> Bool { managedAgentIDs?.contains(agent.rawValue) ?? true }
 
     func load() {
         guard loadTask == nil else { return }
@@ -58,7 +69,8 @@ final class SessionLibraryModel: ObservableObject {
     }
 
     func open() {
-        guard !didOpen else { return }
+        wantsOpen = true
+        guard !didOpen, managedAgentIDs?.isEmpty != true else { return }
         didOpen = true
         importHistory(days: 30)
     }
@@ -78,15 +90,16 @@ final class SessionLibraryModel: ObservableObject {
         guard !isImporting else { return }
         isImporting = true
         let scanner = historyScanner
+        let ids = managedAgentIDs
         importTask = Task {
             defer { isImporting = false; importTask = nil }
             let work = Task.detached(priority: .utility) {
-                try scanner(days.map { Double($0) * 86_400 } ?? Date().timeIntervalSince1970 + 86_400)
+                try scanner(days.map { Double($0) * 86_400 } ?? Date().timeIntervalSince1970 + 86_400, ids)
             }
             do {
                 let sessions = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
                 try Task.checkCancellation()
-                publish(try await catalog.ingest(sessions))
+                publish(try await catalog.ingest(sessions.filter { includes($0.agent) }))
                 errorMessage = nil
                 notice = days == nil ? L10n.t("Imported available history. Conversation text was not stored.")
                     : L10n.t("Imported the last %d days. Conversation text was not stored.", days!)
@@ -127,7 +140,7 @@ final class SessionLibraryModel: ObservableObject {
                 self.pendingSelection = nil
                 self.selectNow(next)
             } else { self.selectNow(selectedID) }
-            self.notice = L10n.t("Session details saved in Muster.")
+            // Saved/unsaved feedback belongs to the current editor, not a lasting banner.
         }
     }
 
@@ -186,6 +199,7 @@ final class SessionLibraryModel: ObservableObject {
     }
 
     private func selectNow(_ id: String) {
+        if selectedID != id { notice = nil }
         selectedID = id
         editingOriginal = snapshot.sessions.first { $0.id == id }?.annotation
         draft = editingOriginal ?? SessionAnnotation()
@@ -202,6 +216,7 @@ final class SessionLibraryModel: ObservableObject {
     private func perform(_ operation: @escaping () async throws -> SessionCatalogSnapshot,
                          success: @escaping () -> Void = {}) {
         guard !isSaving else { return }
+        notice = nil
         isSaving = true
         operationTask = Task {
             defer { isSaving = false; operationTask = nil }
