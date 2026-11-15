@@ -135,6 +135,8 @@ struct SkillsView: View {
 
     private func skillRow(_ skill: SkillRecord) -> some View {
         let marked = model.markedIDs.contains(skill.id)
+        let deployments = model.snapshot.deployments.filter { $0.skillID == skill.id }
+        let outsideScope = deployments.filter { model.availableAgentIDs?.contains($0.targetID) == false }
         return Button { model.select(skill.id) } label: {
             HStack(alignment: .top, spacing: T.s2) {
                 Button {
@@ -148,24 +150,67 @@ struct SkillsView: View {
                 .help(L10n.t(marked ? "Remove from the batch" : "Add to the batch"))
                 .opacity(model.markedIDs.count > 1 || marked || model.isBatch ? 1 : 0.35)
                 VStack(alignment: .leading, spacing: T.s1) {
-                    Text(skill.name).font(T.body.weight(.medium)).lineLimit(1)
-                    Text(skill.summary).font(T.small).foregroundStyle(T.muted).lineLimit(2)
-                    let deployments = model.snapshot.deployments.filter { $0.skillID == skill.id }
                     HStack(spacing: T.s2) {
-                        Text(deployments.isEmpty ? L10n.t("Not deployed") : deployments.map {
-                            let name = AgentRegistry.agent($0.targetID)?.name ?? $0.targetID
-                            return model.availableAgentIDs?.contains($0.targetID) == false ? L10n.t("%@ (outside current scope)", name) : name
-                        }.joined(separator: " · ")).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
+                        Text(skill.name).font(T.body.weight(.medium)).lineLimit(1)
                         if deployments.contains(where: { $0.revision != skill.revision }) {
                             Text(L10n.t("Needs update")).font(T.micro).foregroundStyle(T.amber)
                         }
                     }
-                }
+                    Text(skill.summary).font(T.small).foregroundStyle(T.muted).lineLimit(2)
+                    if !outsideScope.isEmpty {
+                        Text(outsideScope.map {
+                            let name = AgentRegistry.agent($0.targetID)?.name ?? $0.targetID
+                            return L10n.t("%@ (outside current scope)", name)
+                        }.joined(separator: " · ")).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
+                    }
+                }.padding(.bottom, model.deploymentTargets.isEmpty ? 0 : 28)
             }.padding(T.s2).frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: T.r).fill(model.selectedID == skill.id ? T.accentSoft : .clear))
                 .contentShape(Rectangle())
         }.buttonStyle(InteractivePlainButtonStyle(pressedScale: 1)).disabled(model.isBusy)
+            .overlay(alignment: .bottomTrailing) {
+                if !model.deploymentTargets.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(model.deploymentTargets) { target in
+                            agentToggle(skill, target: target,
+                                deployment: deployments.first { $0.targetID == target.id })
+                        }
+                    }.padding(.trailing, T.s2).padding(.bottom, T.s2)
+                }
+            }
             .accessibilityAddTraits(model.selectedID == skill.id ? .isSelected : [])
+    }
+
+    /// A compact per-Agent switch; the deployment still goes through the library plan.
+    private func agentToggle(_ skill: SkillRecord, target: SkillTarget, deployment: SkillDeployment?) -> some View {
+        let deployed = deployment != nil
+        let label = L10n.t(deployed ? "Disable in %@" : "Enable in %@", target.name)
+        let directory = (target.directory as NSString).abbreviatingWithTildeInPath
+        return Button { model.toggleDeployment(skill, target: target) } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(T.card2)
+                AgentLogo(agentID: target.id,
+                          mark: target.id == "pi" ? "π" : String(target.name.prefix(1)), size: 17)
+                    .saturation(deployed ? 1 : 0)
+                    .opacity(deployed ? 1 : 0.45)
+            }
+            .frame(width: 26, height: 26)
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(T.line, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.88))
+        .help("\(label) · \(directory)")
+        .accessibilityLabel(label)
+        .contextMenu {
+            Button(label) { model.toggleDeployment(skill, target: target) }
+            if let deployment {
+                Divider()
+                Button(L10n.t("Use symbolic link")) { model.setDeploymentMode(skill, target: target, .symlink) }
+                    .disabled(deployment.mode == .symlink)
+                Button(L10n.t("Use a copy")) { model.setDeploymentMode(skill, target: target, .copy) }
+                    .disabled(deployment.mode == .copy)
+            }
+        }
     }
 
     @ViewBuilder private var detail: some View {
@@ -204,7 +249,11 @@ struct SkillsView: View {
                                 .font(T.micro).foregroundStyle(T.amber).fixedSize(horizontal: false, vertical: true)
                         }
                         source(skill)
-                        if model.isBatch { batchDeployment(skill) } else { deployment(skill) }
+                        if model.deploymentTargets.isEmpty {
+                            Label(scopeExplanation, systemImage: "info.circle")
+                                .font(T.micro).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if model.isBatch { batchDeployment(skill) }
                         editorSection
                     }.padding(T.s4)
                 }
@@ -326,23 +375,6 @@ struct SkillsView: View {
         }
     }
 
-    private func deployment(_ skill: SkillRecord) -> some View {
-        let targets = model.deploymentTargets.filter { agentID == "all" || $0.id == agentID }
-        return VStack(alignment: .leading, spacing: T.s2) {
-            HStack {
-                Text(L10n.t("Deploy to Agents")).font(T.section)
-                Spacer()
-                Button(L10n.t("Preview deployment")) { model.preview() }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.isBusy)
-            }
-            if targets.isEmpty {
-                Text(scopeExplanation).font(T.small).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(targets) { target in
-                targetRow(target, skill: skill)
-            }.disabled(model.isBusy)
-        }
-    }
-
     /// Says which Agent is missing and where to enable it, instead of a bare "unsupported".
     private var scopeExplanation: String {
         let out = model.scopedOutTargets
@@ -360,16 +392,11 @@ struct SkillsView: View {
     }
 
     private func targetRow(_ target: SkillTarget, skill: SkillRecord) -> some View {
-        let deployed = model.snapshot.deployments.first { $0.skillID == skill.id && $0.targetID == target.id }
-        return VStack(alignment: .leading, spacing: T.s1) {
+        VStack(alignment: .leading, spacing: T.s1) {
             HStack {
                 Toggle(target.name, isOn: Binding(get: { model.isEnabled(target) }, set: { model.setEnabled(target, $0) }))
                     .toggleStyle(.checkbox).font(T.body)
                 Spacer(minLength: T.s2)
-                if !model.isBatch, let deployed {
-                    Text(L10n.t(deployed.revision == skill.revision ? "Deployed" : "Older version deployed"))
-                        .font(T.micro).foregroundStyle(deployed.revision == skill.revision ? T.muted : T.amber)
-                }
                 InlineSelect(items: SkillInstallMode.allCases, label: { L10n.t($0 == .symlink ? "Symbolic link" : "Copy") },
                     selection: Binding(get: { model.mode(target) }, set: { model.setMode(target, $0) }))
                     .disabled(!model.isEnabled(target))

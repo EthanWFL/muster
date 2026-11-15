@@ -63,6 +63,9 @@ final class SkillsModel: ObservableObject {
     @Published private(set) var removedFiles = Set<String>()
     private var pendingSelection: UUID?
     private var undoing = false
+    /// The skill an inline Agent switch is reviewing, when it is not the selected one.
+    private var inlineSkillID: UUID?
+    private var inlineDesired: [String: SkillInstallMode] = [:]
     private var didLoad = false
     private var reloadRequested = false
 
@@ -241,15 +244,61 @@ final class SkillsModel: ObservableObject {
 
     // MARK: - Deployment
 
+    /// One-click Agent switch from the library list. Conflict-free plans apply immediately;
+    /// a folder that needs adoption still opens the review sheet, scoped to this skill.
+    func toggleDeployment(_ skill: SkillRecord, target: SkillTarget) {
+        guard !isBusy else { return }
+        var next = deployments(of: skill)
+        if next.removeValue(forKey: target.id) == nil { next[target.id] = .symlink }
+        updateDeployment(skill, to: next)
+    }
+
+    /// Switches an existing deployment between a symbolic link and a copy.
+    func setDeploymentMode(_ skill: SkillRecord, target: SkillTarget, _ mode: SkillInstallMode) {
+        guard !isBusy else { return }
+        var next = deployments(of: skill)
+        guard next[target.id] != nil, next[target.id] != mode else { return }
+        next[target.id] = mode
+        updateDeployment(skill, to: next)
+    }
+
+    private func deployments(of skill: SkillRecord) -> [String: SkillInstallMode] {
+        Dictionary(uniqueKeysWithValues: snapshot.deployments
+            .filter { $0.skillID == skill.id }.map { ($0.targetID, $0.mode) })
+    }
+
+    private func updateDeployment(_ skill: SkillRecord, to next: [String: SkillInstallMode]) {
+        let resetEditor = selectedID == skill.id && !deploymentDirty
+        run("Updating deployment") {
+            let targets = self.deploymentTargets
+            let plan = try await self.library.plan(skill.id, desired: next, targets: targets,
+                targetIDs: Set(targets.map(\.id)), adopting: [])
+            guard !plan.items.isEmpty else { return }
+            guard plan.canApply else {
+                self.inlineSkillID = skill.id
+                self.inlineDesired = next
+                self.undoing = false
+                self.plan = plan
+                self.showsPlan = true
+                return
+            }
+            self.snapshot = try await self.library.apply(plan)
+            self.publishDiscovered(try await self.library.discover(targets: targets))
+            if resetEditor { self.resetDesired(skill.id) }
+            self.notice = L10n.t("Deployment saved. Reload the Agent if the skill is not listed yet.")
+        }
+    }
     func preview() {
-        guard let id = selectedID else { return }
+        let inlineID = inlineSkillID
+        guard let id = inlineID ?? selectedID else { return }
         run("Building deployment preview") {
             self.undoing = false
-            let desired = self.isBatch ? self.batchDesired : self.desired
-            let ids = self.isBatch ? Array(self.markedIDs) : [id]
+            let batch = inlineID == nil && self.isBatch
+            let desired = inlineID == nil ? (batch ? self.batchDesired : self.desired) : self.inlineDesired
+            let ids = batch ? Array(self.markedIDs) : [id]
             let targets = self.deploymentTargets
             let visible = Set(targets.map(\.id))
-            self.plan = self.isBatch
+            self.plan = batch
                 ? try await self.library.planBatch(ids, mode: desired, targets: targets, targetIDs: visible, adopting: self.adopting)
                 : try await self.library.plan(ids[0], desired: desired, targets: targets,
                     targetIDs: visible, adopting: self.adopting)
@@ -266,6 +315,7 @@ final class SkillsModel: ObservableObject {
         preview()
     }
     func previewUndo() {
+        inlineSkillID = nil; inlineDesired = [:]
         run("Building undo preview") {
             let plan = try await self.library.undoPreview()
             try self.checkScope(plan)
@@ -278,6 +328,8 @@ final class SkillsModel: ObservableObject {
             try self.checkScope(plan)
             self.snapshot = try await (self.undoing ? self.library.undo(plan) : self.library.apply(plan))
             self.plan = nil
+            self.inlineSkillID = nil
+            self.inlineDesired = [:]
             self.adopting = []
             self.publishDiscovered(try await self.library.discover(targets: self.deploymentTargets))
             if let id = self.selectedID { self.resetDesired(id) }
@@ -287,6 +339,8 @@ final class SkillsModel: ObservableObject {
     }
     func dismissPlan() {
         adopting = []
+        inlineSkillID = nil
+        inlineDesired = [:]
         plan = nil
         showsPlan = false
     }

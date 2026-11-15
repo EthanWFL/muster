@@ -55,22 +55,33 @@ struct QuickAgentView: View {
         .onChange(of: workspace.availableAgents.map(\.id)) { _, _ in prepareConfiguration() }
     }
 
+    // Split into two properties: the combined expression was over the type-checker's budget on CI.
     @ViewBuilder private var agentPicker: some View {
-        if workspace.quickSection == .rules {
-            InlineSelect(items: ["all"] + workspace.availableAgents.map(\.id),
-                label: { $0 == "all" ? L10n.t("All Agents") : (AgentRegistry.agent($0)?.name ?? $0) },
-                selection: Binding(get: {
-                    workspace.availableAgents.contains(where: { $0.id == workspace.quickRulesAgentID }) ? workspace.quickRulesAgentID : "all"
-                }, set: { workspace.selectQuickRulesAgent($0) }))
-                .disabled(workspace.isCheckingAgents)
-        } else {
-            let targets = workspace.quickConfigurationTargets
-            let current = targets.first { $0.id == configuration.selected?.id }?.id
-            let items = (current == nil ? [String?.none] : []) + targets.map { Optional($0.id) }
-            InlineSelect(items: items, label: { id in targets.first { $0.id == id }?.name ?? L10n.t("Select Agent") },
-                selection: Binding(get: { current }, set: { if let id = $0 { workspace.selectQuickConfigurationAgent(id) } }))
-                .disabled(workspace.isCheckingAgents || targets.isEmpty)
-        }
+        if workspace.quickSection == .rules { rulesAgentPicker } else { configurationAgentPicker }
+    }
+
+    private var rulesAgentPicker: some View {
+        let ids: [String] = ["all"] + workspace.availableAgents.map(\.id)
+        let selection: Binding<String> = Binding(get: {
+            workspace.availableAgents.contains(where: { $0.id == workspace.quickRulesAgentID }) ? workspace.quickRulesAgentID : "all"
+        }, set: { workspace.selectQuickRulesAgent($0) })
+        return InlineSelect(items: ids,
+            label: { $0 == "all" ? L10n.t("All Agents") : (AgentRegistry.agent($0)?.name ?? $0) },
+            icon: { $0 == "all" ? nil : $0 },
+            selection: selection)
+            .disabled(workspace.isCheckingAgents)
+    }
+
+    private var configurationAgentPicker: some View {
+        let targets = workspace.quickConfigurationTargets
+        let current: String? = targets.first { $0.id == configuration.selected?.id }?.id
+        let items: [String?] = (current == nil ? [String?.none] : []) + targets.map { Optional($0.id) }
+        let selection: Binding<String?> = Binding(get: { current }, set: { if let id = $0 { workspace.selectQuickConfigurationAgent(id) } })
+        return InlineSelect(items: items,
+            label: { id in targets.first { $0.id == id }?.name ?? L10n.t("Select Agent") },
+            icon: { $0 },
+            selection: selection)
+            .disabled(workspace.isCheckingAgents || targets.isEmpty)
     }
     private func prepareConfiguration() {
         if isVisible && workspace.quickSection == .configuration { workspace.prepareQuickConfiguration() }

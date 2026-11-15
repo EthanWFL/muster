@@ -137,8 +137,10 @@ struct ConfigurationView: View {
         HStack(spacing: T.s2) {
             AgentLogo(agentID: selected.id, mark: selected.id == "pi" ? "π" : String(selected.name.prefix(1)))
             if showsAgentPicker {
+                let selection: Binding<AgentConfiguration> = Binding(get: { selected }, set: { model.select($0) })
                 InlineSelect(items: model.targets, label: { $0.name },
-                         selection: Binding(get: { selected }, set: { model.select($0) }))
+                         icon: { $0.id },
+                         selection: selection)
                 .disabled(model.dirty)
             } else { Text(selected.name).font(T.body) }
             Spacer()

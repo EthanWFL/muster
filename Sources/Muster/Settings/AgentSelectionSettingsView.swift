@@ -15,7 +15,7 @@ struct AgentSelectionSettingsView: View {
                 .font(T.small).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true).padding(.horizontal, T.s3)
             Card {
                 ForEach(Array(AgentRegistry.all.enumerated()), id: \.element.id) { index, agent in
-                    SettingsRow(label: agent.name,
+                    SettingsRow(label: agent.name, agentID: agent.id,
                         hint: L10n.t(selection.isChecking ? "Checking…" : (selection.state.detected.contains(where: { $0.id == agent.id }) ? "Detected on this Mac" : "Not detected on this Mac"))) {
                         MiniSwitch(isOn: Binding(get: { selection.manages(agent.id) }, set: { selection.setManaged(agent.id, $0) }), label: agent.name)
                             .disabled(selection.isChecking || !selection.state.hasDetected)

@@ -471,9 +471,13 @@
 "Preview deployment" = "预览部署";
 "Skill deployment is not supported for this Agent yet." = "此 Agent 暂不支持技能部署。";
 "Deployed" = "已部署";
+"Disable in %@" = "在 %@ 中停用";
+"Enable in %@" = "在 %@ 中启用";
 "Older version deployed" = "已部署旧版本";
 "Symbolic link" = "符号链接";
 "Copy" = "副本";
+"Use symbolic link" = "使用符号链接";
+"Use a copy" = "使用副本";
 "Shared directory: also visible to %@. Per-Agent switches cannot hide its contents." = "共享目录也会被 %@ 读取，单个 Agent 的开关无法隐藏其中的技能。";
 "A skill with this name is also visible in a shared directory. This switch controls only the dedicated directory." = "共享目录中也有同名技能，此开关仅控制专属目录中的部署。";
 "Keep this skill draft?" = "保留当前技能草稿？";

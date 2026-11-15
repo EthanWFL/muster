@@ -43,17 +43,25 @@ struct AgentWorkspaceView: View {
 
     private var windowToolbar: some View {
         HStack(spacing: T.s3) {
-            InlineSelect(items: ["all"] + workspace.availableAgents.map(\.id),
-                label: { $0 == "all" ? L10n.t("All Agents") : (AgentRegistry.agent($0)?.name ?? $0) },
-                selection: Binding(get: {
-                    workspace.availableAgents.contains(where: { $0.id == workspace.agentID }) ? workspace.agentID : "all"
-                }, set: { workspace.selectAgent($0) }))
+            agentScopePicker
                 .disabled(workspace.isCheckingAgents)
             IconButton(symbol: "arrow.clockwise", label: L10n.t("Refresh installed Agents"), isBusy: workspace.isCheckingAgents) { workspace.refreshAgents() }
             Spacer(minLength: 0)
             SegmentedControl(items: AgentSection.allCases, selection: Binding(get: { workspace.section }, set: { workspace.selectSection($0) }),
                              label: \.title).frame(width: 260)
         }.padding(T.s3)
+    }
+
+    // Kept separate from the toolbar: one combined expression exceeded the CI type-check budget.
+    private var agentScopePicker: some View {
+        let ids: [String] = ["all"] + workspace.availableAgents.map(\.id)
+        let selection: Binding<String> = Binding(get: {
+            workspace.availableAgents.contains(where: { $0.id == workspace.agentID }) ? workspace.agentID : "all"
+        }, set: { workspace.selectAgent($0) })
+        return InlineSelect(items: ids,
+            label: { $0 == "all" ? L10n.t("All Agents") : (AgentRegistry.agent($0)?.name ?? $0) },
+            icon: { $0 == "all" ? nil : $0 },
+            selection: selection)
     }
 
     private var configuration: some View {

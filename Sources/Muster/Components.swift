@@ -204,12 +204,16 @@ struct Card<Content: View>: View {
 /// 「左标签、右控件」的两列行。
 struct SettingsRow<Content: View>: View {
     let label: String
+    var agentID: String? = nil
     var hint: String?
     @ViewBuilder var content: Content
 
     var body: some View {
         // 双行行（带说明）控件居中对齐：按第一行基线对齐会明显偏上
         HStack(alignment: .center, spacing: T.s2) {
+            if let agentID {
+                AgentLogo(agentID: agentID, mark: agentID == "pi" ? "π" : String(label.prefix(1)), size: 20)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(label).font(T.body).foregroundStyle(T.fg)
                 if let hint {
@@ -268,6 +272,18 @@ enum AgentLogos {
         }
         return nil
     }
+
+    /// 菜单图标由 AppKit 按 NSImage.size 直接绘制，必须传入缩放后的位图；
+    /// SwiftUI 的 .frame 在菜单项里不生效。
+    static func menuImage(_ id: String, size: CGFloat = 16) -> NSImage? {
+        guard let image = image(id) else { return nil }
+        let resized = NSImage(size: NSSize(width: size, height: size))
+        resized.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+        resized.unlockFocus()
+        return resized
+    }
 }
 
 struct AgentLogo: View {
@@ -304,6 +320,7 @@ struct AgentLogo: View {
 struct InlineSelect<Item: Hashable>: View {
     let items: [Item]
     let label: (Item) -> String
+    var icon: ((Item) -> String?)? = nil
     var header: String? = nil
     @Binding var selection: Item
     var customAction: (() -> Void)? = nil
@@ -312,9 +329,15 @@ struct InlineSelect<Item: Hashable>: View {
         Menu {
             if let header { Text(header) }
             ForEach(items, id: \.self) { item in
-                Button { selection = item } label: {
-                    if item == selection {
-                        Label(label(item), systemImage: "checkmark")
+                Toggle(isOn: Binding(get: { item == selection }, set: { if $0 { selection = item } })) {
+                    if let id = icon?(item) {
+                        Label {
+                            Text(label(item))
+                        } icon: {
+                            if let image = AgentLogos.menuImage(id) {
+                                Image(nsImage: image)
+                            }
+                        }
                     } else {
                         Text(label(item))
                     }
@@ -325,7 +348,7 @@ struct InlineSelect<Item: Hashable>: View {
                 Button(L10n.t("Custom…"), action: customAction)
             }
         } label: {
-            CompactMenuLabel(title: label(selection))
+            CompactMenuLabel(title: label(selection), agentID: icon?(selection))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -339,10 +362,14 @@ struct InlineSelect<Item: Hashable>: View {
 struct CompactMenuLabel: View {
     let title: String
     var symbol: String? = nil
+    var agentID: String? = nil
 
     var body: some View {
         HStack(spacing: T.s1) {
             if let symbol { Image(systemName: symbol).font(T.seg) }
+            if let agentID {
+                AgentLogo(agentID: agentID, mark: agentID == "pi" ? "π" : String(title.prefix(1)), size: 14)
+            }
             Text(title).font(T.seg).lineLimit(1)
             Image(systemName: "chevron.down").font(T.glyph)
         }

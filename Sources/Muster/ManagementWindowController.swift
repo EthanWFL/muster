@@ -55,6 +55,9 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
             window.title = "Muster"
+            // The menu bar panel lives on every Space; the management window must follow it
+            // instead of pulling the user back to the Space where the window was last shown.
+            window.collectionBehavior.insert(.moveToActiveSpace)
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none

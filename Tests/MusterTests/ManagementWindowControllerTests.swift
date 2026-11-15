@@ -10,6 +10,7 @@ import MusterCore
         let controller = fixture.controller
         controller.open()
         let window = try #require(controller.window)
+        #expect(window.collectionBehavior.contains(.moveToActiveSpace))
         window.setFrameAutosaveName("")
         let userFrame = try fixture.resizedFrame(for: window)
         window.setFrame(userFrame, display: false)

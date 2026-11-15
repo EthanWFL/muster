@@ -470,9 +470,13 @@
 "Preview deployment" = "Preview deployment";
 "Skill deployment is not supported for this Agent yet." = "Skill deployment is not supported for this Agent yet.";
 "Deployed" = "Deployed";
+"Disable in %@" = "Disable in %@";
+"Enable in %@" = "Enable in %@";
 "Older version deployed" = "Older version deployed";
 "Symbolic link" = "Symbolic link";
 "Copy" = "Copy";
+"Use symbolic link" = "Use Symbolic Link";
+"Use a copy" = "Use a Copy";
 "Shared directory: also visible to %@. Per-Agent switches cannot hide its contents." = "Shared directory: also visible to %@. Per-Agent switches cannot hide its contents.";
 "A skill with this name is also visible in a shared directory. This switch controls only the dedicated directory." = "A skill with this name is also visible in a shared directory. This switch controls only the dedicated directory.";
 "Keep this skill draft?" = "Keep this skill draft?";

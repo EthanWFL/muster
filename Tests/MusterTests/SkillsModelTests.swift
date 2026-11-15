@@ -32,6 +32,64 @@ import MusterCore
         #expect(!model.isBatch && model.markedIDs == [first.id])
     }
 
+    @Test func inlineToggleDeploysAndUndeploysWithoutLeavingTheList() async throws {
+        let (library, target, root) = try await makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = SkillsModel(library: library, targets: [target])
+        model.load(); await model.operationTask?.value
+        let skill = try #require(model.snapshot.skills.first)
+        model.toggleDeployment(skill, target: target); await model.operationTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(!model.showsPlan && model.plan == nil)
+        #expect(model.snapshot.deployments.contains { $0.skillID == skill.id && $0.targetID == target.id })
+
+        model.toggleDeployment(skill, target: target); await model.operationTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(model.snapshot.deployments.isEmpty)
+    }
+
+    @Test func inlineModeSwitchUpdatesTheExistingDeployment() async throws {
+        let (library, target, root) = try await makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = SkillsModel(library: library, targets: [target])
+        model.load(); await model.operationTask?.value
+        let skill = try #require(model.snapshot.skills.first)
+        model.toggleDeployment(skill, target: target); await model.operationTask?.value
+        #expect(model.snapshot.deployments.first?.mode == .symlink)
+
+        model.setDeploymentMode(skill, target: target, .copy); await model.operationTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(!model.showsPlan && model.plan == nil)
+        #expect(model.snapshot.deployments.first?.mode == .copy)
+    }
+
+    @Test func inlineToggleOnAnOccupiedFolderReviewsTheClickedSkillOnly() async throws {
+        let (library, target, root) = try await makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let occupied = URL(fileURLWithPath: target.directory).appendingPathComponent("one")
+        try FileManager.default.createDirectory(at: occupied, withIntermediateDirectories: true)
+        try "---\nname: one\ndescription: Hand written\n---\nMine.".write(
+            to: occupied.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        let model = SkillsModel(library: library, targets: [target])
+        model.load(); await model.operationTask?.value
+        let skill = try #require(model.snapshot.skills.first { $0.name == "one" })
+        let other = try #require(model.snapshot.skills.first { $0.name == "two" })
+        model.select(other.id); await model.operationTask?.value
+
+        model.toggleDeployment(skill, target: target); await model.operationTask?.value
+        #expect(model.showsPlan)
+        let blocked = try #require(model.plan)
+        #expect(!blocked.canApply && blocked.skillIDs == [skill.id] && blocked.adoptablePaths == [occupied.path])
+
+        model.adoptAll(); await model.operationTask?.value
+        let plan = try #require(model.plan)
+        #expect(plan.canApply && plan.skillIDs == [skill.id])
+        model.apply(); await model.operationTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(model.selectedID == other.id)
+        #expect(try String(contentsOf: occupied.appendingPathComponent("SKILL.md"), encoding: .utf8).contains("# one"))
+    }
+
     @Test func batchPreviewDeploysEveryMarkedSkillInOnePlan() async throws {
         let (library, target, root) = try await makeLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
