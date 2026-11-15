@@ -9,6 +9,10 @@ public enum SkillError: String, LocalizedError {
     case scanLimit = "The search exceeded its directory limit. Choose a smaller folder."
     case changed = "The skill or its destination changed. Refresh and preview again."
     case occupied = "This destination contains files not managed by Muster. They have been left unchanged."
+    case deployed = "This skill is deployed to one or more Agents. Disable those deployments before removing it."
+    case sourceIsDeployment = "This skill was imported from an Agent folder that Muster now deploys into, so that folder can no longer be its update source."
+    case unsupportedFile = "This file is not UTF-8 text or is too large to open in the editor."
+    case invalidFileName = "Use a relative path made of folder and file names without empty parts, “.” or “..”."
     case corrupt = "The skill library could not be read. Its files have been left unchanged."
     case missing = "This skill or revision is no longer available."
     case noSource = "This skill has no update source."
@@ -93,6 +97,8 @@ public struct SkillDeployment: Codable, Equatable, Identifiable, Sendable {
 
 public struct SkillPlanItem: Identifiable, Sendable {
     public var id: String { path }
+    public let skillID: UUID
+    public let skillName: String
     public let targetName: String
     public let path: String
     public let before: SkillDeployment?
@@ -101,6 +107,13 @@ public struct SkillPlanItem: Identifiable, Sendable {
     public let resolvedParent: String
     public let conflict: String?
     public let sharedReaders: [String]
+    /// An unmanaged folder already occupies this destination, so the plan can only apply after
+    /// the user lets Muster move that folder into the library as a backup.
+    public let adoptable: Bool
+    /// This plan replaces an unmanaged folder; the original is parked at `backup`.
+    public let adopts: Bool
+    /// Where a replaced folder is parked, or where undo finds the folder it has to move back.
+    public let backup: String?
 }
 
 public struct SkillPlan: Identifiable, Sendable {
@@ -108,11 +121,34 @@ public struct SkillPlan: Identifiable, Sendable {
     public let libraryRevision: UInt64
     public let items: [SkillPlanItem]
     public var canApply: Bool { !items.isEmpty && items.allSatisfy { $0.conflict == nil } }
+    /// Paths that block the plan until they are allowed to be replaced.
+    public var adoptablePaths: [String] { items.filter(\.adoptable).map(\.path) }
+    public var adoptions: Int { items.filter(\.adopts).count }
+    public var conflicts: Int { items.filter { $0.conflict != nil }.count }
+    /// Skills the plan touches, in the order they first appear.
+    public var skillIDs: [UUID] {
+        var seen = Set<UUID>()
+        return items.compactMap { seen.insert($0.skillID).inserted ? $0.skillID : nil }
+    }
 }
 
 public struct SkillDraft: Codable, Sendable {
     public let baseRevision: String
     public let text: String
+    /// Edited text files, relative to the skill folder. `SKILL.md` is always carried by `text`.
+    public var files: [String: String]
+    public var removed: [String]
+    public init(baseRevision: String, text: String, files: [String: String] = [:], removed: [String] = []) {
+        self.baseRevision = baseRevision; self.text = text; self.files = files; self.removed = removed
+    }
+    private enum CodingKeys: String, CodingKey { case baseRevision, text, files, removed }
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseRevision = try container.decode(String.self, forKey: .baseRevision)
+        text = try container.decode(String.self, forKey: .text)
+        files = try container.decodeIfPresent([String: String].self, forKey: .files) ?? [:]
+        removed = try container.decodeIfPresent([String].self, forKey: .removed) ?? []
+    }
 }
 
 public struct SkillContent: Sendable {
@@ -120,6 +156,12 @@ public struct SkillContent: Sendable {
     public let files: [String]
     public let directory: URL
     public let draft: SkillDraft?
+    /// Editable text files other than `SKILL.md`, keyed by their relative path.
+    public let texts: [String: String]
+
+    public init(text: String, files: [String], directory: URL, draft: SkillDraft?, texts: [String: String] = [:]) {
+        self.text = text; self.files = files; self.directory = directory; self.draft = draft; self.texts = texts
+    }
 }
 
 public struct SkillDiscovery: Identifiable, Sendable {

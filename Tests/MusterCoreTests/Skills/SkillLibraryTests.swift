@@ -196,6 +196,9 @@ private struct SkillFixture {
         try "Reference".write(to: source.appendingPathComponent("references/guide.md"), atomically: true, encoding: .utf8)
     }
     func candidate() throws -> SkillCandidate { try #require(SkillScanner.candidates(at: source).first) }
+    func documentText() -> String {
+        "---\nname: review\ndescription: Review changes\nlicense: MIT\n---\n\nKeep findings concise.\n"
+    }
     func destination(_ index: Int) -> URL { URL(fileURLWithPath: targets[index].directory).appendingPathComponent("review/SKILL.md") }
     func cleanup() { try? FileManager.default.removeItem(at: root) }
 }
@@ -254,5 +257,177 @@ extension SkillLibraryTests {
         let snapshot = try await f.library.importSkill(candidate)
         #expect(snapshot.skills.count == 2)
         #expect(Set(snapshot.skills.map { $0.source.location }).count == 2)
+    }
+}
+
+extension SkillLibraryTests {
+    /// The most common real-world state: the Agent folder already holds a hand-written skill.
+    @Test func existingAgentFolderIsOnlyReplacedAfterExplicitBackup() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        let destination = URL(fileURLWithPath: f.destination(0).deletingLastPathComponent().path)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try "---\nname: review\ndescription: Hand written\n---\nMine.".write(
+            to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+        let blocked = try await f.library.plan(skill.id, desired: ["claude": .copy], targets: f.targets)
+        #expect(!blocked.canApply)
+        #expect(blocked.adoptablePaths == [f.destination(0).deletingLastPathComponent().path])
+        #expect(blocked.items[0].adoptable && !blocked.items[0].adopts)
+        #expect(try String(contentsOf: f.destination(0), encoding: .utf8).contains("Mine."))
+
+        let adopting: Set<String> = [destination.path]
+        let plan = try await f.library.plan(skill.id, desired: ["claude": .copy], targets: f.targets, adopting: adopting)
+        #expect(plan.canApply)
+        #expect(plan.adoptions == 1)
+        let backup = try #require(plan.items[0].backup)
+        _ = try await f.library.apply(plan)
+        #expect(try String(contentsOf: f.destination(0), encoding: .utf8).contains("Keep findings concise."))
+        #expect(try String(contentsOf: URL(fileURLWithPath: backup).appendingPathComponent("SKILL.md"), encoding: .utf8).contains("Mine."))
+
+        // Disabling returns the backed-up folder instead of leaving a hole.
+        _ = try await f.library.apply(f.library.plan(skill.id, desired: [:], targets: f.targets))
+        #expect(try String(contentsOf: f.destination(0), encoding: .utf8).contains("Mine."))
+    }
+
+    @Test func adoptionNeverReplacesAFolderThatIsNotASkill() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        let destination = f.destination(0).deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try "notes".write(to: destination.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        let plan = try await f.library.plan(skill.id, desired: ["claude": .copy], targets: f.targets,
+            adopting: [destination.path])
+        #expect(!plan.canApply)
+        #expect(plan.adoptablePaths.isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path) == ["notes.txt"])
+    }
+
+    @Test func removingOrRenamingStopsWhileADeploymentStillPointsAtTheOldName() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .copy], targets: f.targets))
+        await #expect(throws: SkillError.deployed) { try await f.library.remove(skill.id, expectedRevision: skill.revision) }
+        await #expect(throws: SkillError.deployed) { try await f.library.rename(skill.id, expectedRevision: skill.revision, to: "renamed") }
+        #expect(try await f.library.load().skills.first?.name == "review")
+
+        _ = try await f.library.apply(f.library.plan(skill.id, desired: [:], targets: f.targets))
+        let renamed = try await f.library.rename(skill.id, expectedRevision: skill.revision, to: "renamed")
+        #expect(renamed.skills.first?.name == "renamed")
+        // Everything besides the frontmatter name survives verbatim.
+        let text = try await f.library.content(skill.id).text
+        #expect(text.contains("name: renamed") && text.contains("license: MIT") && text.contains("Keep findings concise."))
+        #expect(try await f.library.content(skill.id).files.contains("references/guide.md"))
+
+        let removed = try await f.library.remove(skill.id, expectedRevision: renamed.skills[0].revision)
+        #expect(removed.skills.isEmpty && removed.deployments.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appendingPathComponent("library/skills/\(skill.id.uuidString)").path))
+    }
+
+    @Test func aLocalSourceThatMusterNowDeploysIntoIsNoLongerAnUpdateSource() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        #expect(try await f.library.updateSource(skill.id).location == f.source.path)
+        // Importing `~/.claude/skills/review` and deploying to `~/.claude/skills` means the destination
+        // *is* the imported folder, so it has to be adopted before the deployment can happen.
+        let target = SkillTarget(id: "claude", name: "Claude", directory: f.source.deletingLastPathComponent().path)
+        let occupied = try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: [target])
+        #expect(occupied.adoptablePaths == [f.source.path])
+        _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .symlink], targets: [target],
+            adopting: [f.source.path]))
+        await #expect(throws: SkillError.sourceIsDeployment) { try await f.library.updateSource(skill.id) }
+    }
+
+    @Test func onePlanCanDeploySeveralSkillsAndDisableAllOfThem() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let first = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        let second = try #require(try await f.library.create(name: "second", description: "Second").skills.first { $0.name == "second" })
+        let enabled = try await f.library.planBatch([first.id, second.id], mode: ["claude": .copy, "pi": .copy], targets: f.targets,
+            targetIDs: ["claude", "pi"])
+        #expect(enabled.items.count == 4 && enabled.canApply)
+        _ = try await f.library.apply(enabled)
+        #expect(try await f.library.load().deployments.count == 4)
+
+        // An empty mode still has to remove what is deployed; targetIDs must not filter it away.
+        let disabled = try await f.library.planBatch([first.id, second.id], mode: [:], targets: f.targets, targetIDs: ["claude", "pi"])
+        #expect(disabled.items.count == 4)
+        _ = try await f.library.apply(disabled)
+        #expect(try await f.library.load().deployments.isEmpty)
+    }
+
+    @Test func draftKeepsEditsToSupportingFilesUntilPublish() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        #expect(try await f.library.content(skill.id).texts["references/guide.md"] == "Reference")
+        try await f.library.saveDraft(skill.id, baseRevision: skill.revision, text: skill.revision.isEmpty ? "" : f.documentText(),
+            files: ["references/guide.md": "Edited reference", "scripts/run.sh": "echo edited\n"],
+            removed: [])
+        let reopened = try await f.library.content(skill.id)
+        #expect(reopened.texts["references/guide.md"] == "Edited reference")
+        #expect(reopened.draft?.files["scripts/run.sh"] == "echo edited\n")
+
+        let published = try await f.library.publish(skill.id, expectedRevision: skill.revision, text: f.documentText(),
+            files: ["scripts/run.sh": "echo edited\n"], removed: ["references/guide.md"])
+        let content = try await f.library.content(skill.id)
+        #expect(!content.files.contains("references/guide.md"))
+        #expect(try String(contentsOf: content.directory.appendingPathComponent("scripts/run.sh"), encoding: .utf8) == "echo edited\n")
+        #expect(published.skills.first?.revision != skill.revision)
+    }
+
+    @Test func draftRejectsPathsThatEscapeTheSkillFolder() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        for path in ["../escape.md", "/etc/passwd", "a//b.md", "./x.md", "a/../b"] {
+            await #expect(throws: SkillError.invalidFileName) {
+                try await f.library.publish(skill.id, expectedRevision: skill.revision, text: f.documentText(),
+                    files: [path: "x"], removed: [])
+            }
+        }
+        #expect(try await f.library.load().skills.first?.revision == skill.revision)
+    }
+}
+
+extension SkillLibraryTests {
+    @Test func retitlingOnlyTouchesTheFrontmatterName() throws {
+        let text = "---\nname: old\ndescription: Keep me\nmetadata:\n  author: someone\n---\n\nname: body stays\n"
+        let updated = try SkillDocument.retitled(text, to: "new-name")
+        #expect(updated.contains("name: new-name"))
+        #expect(updated.contains("description: Keep me") && updated.contains("author: someone"))
+        #expect(updated.hasSuffix("name: body stays\n"))
+        #expect(try SkillDocument(updated).name == "new-name")
+        #expect(throws: SkillError.invalidDocument) { try SkillDocument.retitled("# no frontmatter", to: "x") }
+        #expect(throws: SkillError.unsafeName) { try SkillDocument.retitled(text, to: "../escape") }
+    }
+}
+
+extension SkillLibraryTests {
+    /// An adoption backup must survive log rotation. Otherwise a user's original folder would be
+    /// deleted once 20 newer deployments pushed the adoption out of `history`.
+    @Test func adoptedFolderSurvivesHistoryRotationAndStillComesBack() async throws {
+        let f = try SkillFixture(); defer { f.cleanup() }
+        let adopted = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        let destination = f.destination(0).deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try "---\nname: review\ndescription: Mine\n---\nOriginal words.".write(
+            to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        _ = try await f.library.apply(f.library.plan(adopted.id, desired: ["claude": .copy], targets: f.targets,
+            adopting: [destination.path]))
+        let backup = try #require(FileManager.default.contentsOfDirectory(
+            atPath: f.root.appendingPathComponent("library/backups").path).first)
+        #expect(try String(contentsOf: f.root.appendingPathComponent("library/backups/\(backup)/claude-review/SKILL.md"), encoding: .utf8).contains("Original words."))
+
+        // Push the adoption far out of the 20-entry log.
+        for index in 0..<22 {
+            let name = "filler-\(index)"
+            _ = try await f.library.create(name: name, description: name)
+            let filler = try #require(try await f.library.load().skills.first { $0.name == name })
+            _ = try await f.library.apply(f.library.plan(filler.id, desired: ["pi": .copy], targets: f.targets))
+        }
+        #expect(try await f.library.load().canUndo)
+        #expect(FileManager.default.fileExists(atPath: f.root.appendingPathComponent("library/backups/\(backup)").path))
+
+        _ = try await f.library.apply(f.library.plan(adopted.id, desired: [:], targets: f.targets))
+        #expect(try String(contentsOf: f.destination(0), encoding: .utf8).contains("Original words."))
+        #expect(!FileManager.default.fileExists(atPath: f.root.appendingPathComponent("library/backups/\(backup)").path))
     }
 }

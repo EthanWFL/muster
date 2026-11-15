@@ -133,6 +133,7 @@ final class AgentWorkspaceModel: ObservableObject {
         instructions.restrictToAgents(ids)
         configuration.restrictToAgents(ids)
         skills.restrictToAgents(ids)
+        skills.restrictToDetectedAgents(Set(state.detected.map(\.id)))
         if state.hasDetected, agentID != "all", !ids.contains(agentID) {
             agentID = "all"
             defaults.set("all", forKey: "MusterSelectedAgent")

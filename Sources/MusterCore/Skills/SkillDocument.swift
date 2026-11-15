@@ -47,6 +47,29 @@ public struct SkillDocument: Sendable {
         _ = try SkillDocument(text)
         return text
     }
+
+    /// Rewrites the top-level `name` scalar and leaves every other frontmatter line, including
+    /// fields this app does not interpret, exactly as the author wrote it.
+    public static func retitled(_ text: String, to name: String) throws -> String {
+        try validateName(name)
+        guard text.utf8.count <= 1_048_576 else { throw SkillError.tooLarge }
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---"), end < 500 else { throw SkillError.invalidDocument }
+        guard let index = lines[1..<end].firstIndex(where: { line in
+            guard line.first != " ", line.first != "\t", line.hasPrefix("name:") else { return false }
+            let rest = line.dropFirst(5)
+            return rest.isEmpty || rest.first == " "
+        }) else { throw SkillError.invalidDocument }
+        lines[index] = "name: " + name
+        let updated = lines.joined(separator: "\n")
+        _ = try SkillDocument(updated)
+        return updated
+    }
+}
+
+/// Public rules the editor applies before writing a file back into a skill folder.
+public enum SkillPaths {
+    public static func validate(_ path: String) throws { try SkillFiles.validateRelativePath(path) }
 }
 
 /// Bounded, no-follow file traversal shared by imports, fingerprints and copies.
@@ -141,6 +164,51 @@ enum SkillFiles {
         guard let data = files.first(where: { $0.path == "SKILL.md" })?.data,
               let text = String(data: data, encoding: .utf8) else { throw SkillError.invalidDocument }
         return (text, try SkillDocument(text))
+    }
+
+    /// Text files the editor can show. Binary resources stay out of the editor but remain in the skill.
+    static func texts(_ files: [File]) -> [String: String] {
+        var result: [String: String] = [:]
+        for file in files where file.path != "SKILL.md" && file.data.count <= 256 * 1024 {
+            guard let text = String(data: file.data, encoding: .utf8), !text.utf8.contains(0) else { continue }
+            result[file.path] = text
+        }
+        return result
+    }
+
+    /// Rejects anything that could resolve outside the skill folder before a draft is written back.
+    static func validateRelativePath(_ path: String) throws {
+        guard !path.isEmpty, path.utf8.count <= 512, !path.hasPrefix("/"), !path.contains("\\"),
+              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { throw SkillError.invalidFileName }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.isEmpty, parts.allSatisfy({ part in
+            !part.isEmpty && part != "." && part != ".." && part.utf8.count <= 255
+        }) else { throw SkillError.invalidFileName }
+    }
+
+    /// Moves a whole folder or link, including across volumes, without leaving a half destination.
+    static func move(_ source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do { try fm.moveItem(at: source, to: destination); return }
+        catch let error as NSError where error.code != NSFileWriteFileExistsError { _ = error }
+        // Cross-volume moves are copy-then-remove; verify the copy before deleting the original.
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".muster-move-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: temporary) }
+        var info = stat()
+        if lstat(source.path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK {
+            try fm.createSymbolicLink(atPath: temporary.path, withDestinationPath: try fm.destinationOfSymbolicLink(atPath: source.path))
+        } else {
+            try fm.copyItem(at: source, to: temporary)
+        }
+        try fm.moveItem(at: temporary, to: destination)
+        try fm.removeItem(at: source)
+    }
+
+    /// Removes a managed destination; an unreadable folder is left in place and reported.
+    static func discard(_ url: URL) throws {
+        try FileManager.default.removeItem(at: url)
     }
 }
 
