@@ -26,6 +26,8 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var lastActivityAt: Date
     public var state: SessionState
     public var isProcessAlive: Bool
+    /// Only observed for a currently linked process; never inferred from the working directory.
+    public var client: SessionClient?
     public var key: String { agent.rawValue + ":" + id }
     public var hasTranscript: Bool { !id.hasPrefix("proc-") }
     /// 工作目录当前的 git 分支；由面板在合并后填充
@@ -33,7 +35,8 @@ public struct Session: Identifiable, Equatable, Sendable {
 
     public init(
         id: String, agent: AgentKind, cwd: String, pid: Int32? = nil, pidStartTime: Date? = nil,
-        startedAt: Date, lastActivityAt: Date? = nil, state: SessionState = .running
+        startedAt: Date, lastActivityAt: Date? = nil, state: SessionState = .running,
+        client: SessionClient? = nil
     ) {
         self.id = id
         self.agent = agent
@@ -44,6 +47,7 @@ public struct Session: Identifiable, Equatable, Sendable {
         self.lastActivityAt = lastActivityAt ?? startedAt
         self.state = state
         self.isProcessAlive = pid != nil
+        self.client = client
     }
 
     /// 面板里显示的项目目录名

@@ -12,6 +12,8 @@ final class AgentWorkspaceModel: ObservableObject {
     @Published private(set) var agentID: String
     @Published private(set) var quickSection: QuickAgentSection
     @Published private(set) var quickRulesAgentID: String
+    @Published private(set) var quickConfigurationAgentID = "all"
+    @Published private(set) var managedAgents: [AgentDescriptor] = []
     @Published private(set) var availableAgents: [AgentDescriptor] = []
     @Published private(set) var isCheckingAgents = false
     @Published var confirmsAgentChange = false
@@ -40,6 +42,8 @@ final class AgentWorkspaceModel: ObservableObject {
         self.selection.$isChecking.sink { [weak self] in self?.isCheckingAgents = $0 }.store(in: &observations)
         self.selection.$state.sink { [weak self] state in self?.applySelection(state) }.store(in: &observations)
     }
+    var agentOptionIDs: [String] { ["all"] + managedAgents.map(\.id) }
+
     func selectSection(_ section: AgentSection) {
         self.section = section
         defaults.set(section.rawValue, forKey: "MusterAgentSection")
@@ -47,7 +51,7 @@ final class AgentWorkspaceModel: ObservableObject {
         if section == .configuration { alignWindowConfiguration() }
     }
     func selectAgent(_ id: String) {
-        guard id != agentID, id == "all" || availableAgents.contains(where: { $0.id == id }) else { return }
+        guard id != agentID, agentOptionIDs.contains(id) else { return }
         if configuration.dirty { pendingAgentID = id; agentChangeInQuickPanel = false; confirmsAgentChange = true; return }
         selectNow(id)
     }
@@ -63,39 +67,46 @@ final class AgentWorkspaceModel: ObservableObject {
         if section == .configuration { prepareQuickConfiguration() }
     }
     func selectQuickRulesAgent(_ id: String) {
-        guard id == "all" || availableAgents.contains(where: { $0.id == id }) else { return }
+        guard agentOptionIDs.contains(id) else { return }
         quickRulesAgentID = id
         defaults.set(id, forKey: "MusterQuickRulesAgent")
     }
     func prepareQuickConfiguration() {
         configuration.loadIfNeeded()
-        guard !configuration.dirty else { return }
-        let targets = quickConfigurationTargets
+        guard selection.state.hasDetected else { return }
+        if configuration.dirty {
+            if let id = configuration.selected?.id { quickConfigurationAgentID = id }
+            return
+        }
+        if quickConfigurationPrepared {
+            selectQuickConfigurationNow(agentOptionIDs.contains(quickConfigurationAgentID) ? quickConfigurationAgentID : "all")
+            return
+        }
         let remembered = defaults.string(forKey: "MusterQuickConfigurationAgent")
-        let preferred = quickConfigurationPrepared ? nil : targets.first { $0.id == remembered }
-        let current = targets.first { $0.id == configuration.selected?.id }
-        guard let target = preferred ?? current ?? targets.first(where: \.editable) ?? targets.first else { return }
-        quickConfigurationPrepared = true
-        selectQuickConfigurationNow(target.id)
+        let current = configuration.selected?.id
+        let preferred = [remembered, current].compactMap { $0 }.first { agentOptionIDs.contains($0) }
+        selectQuickConfigurationNow(preferred ?? "all")
     }
     func selectQuickConfigurationAgent(_ id: String) {
-        guard quickConfigurationTargets.contains(where: { $0.id == id }) else { return }
-        guard configuration.selected?.id != id else { return }
+        guard agentOptionIDs.contains(id), quickConfigurationAgentID != id else { return }
         if configuration.dirty { pendingAgentID = id; agentChangeInQuickPanel = true; confirmsAgentChange = true; return }
         selectQuickConfigurationNow(id)
     }
     private func selectQuickConfigurationNow(_ id: String) {
-        guard let target = quickConfigurationTargets.first(where: { $0.id == id }) else { return }
-        if configuration.selected?.id != id { configuration.select(target) }
-        guard configuration.selected?.id == id else { return }
+        guard agentOptionIDs.contains(id) else { return }
+        if let target = quickConfigurationTargets.first(where: { $0.id == id }) {
+            if configuration.selected?.id != id { configuration.select(target) }
+            guard configuration.selected?.id == id else { return }
+        }
+        quickConfigurationAgentID = id
         defaults.set(id, forKey: "MusterQuickConfigurationAgent")
         quickConfigurationPrepared = true
         // Both surfaces share one configuration editor; keep the visible window label honest.
         if section == .configuration, agentID != "all" { setWindowAgent(id) }
     }
     func openQuickInWindow(skills: Bool = false) {
-        let id = quickSection == .rules ? quickRulesAgentID : (configuration.selected?.id ?? "all")
-        setWindowAgent(availableAgents.contains(where: { $0.id == id }) ? id : "all")
+        let id = quickSection == .rules ? quickRulesAgentID : quickConfigurationAgentID
+        setWindowAgent(agentOptionIDs.contains(id) ? id : "all")
         selectSection(skills ? .skills : quickSection.windowSection)
         if !skills && quickSection == .rules { instructions.focusActiveSet() }
     }
@@ -105,6 +116,7 @@ final class AgentWorkspaceModel: ObservableObject {
         if save { configuration.save(); guard !configuration.dirty else { return } }
         else { configuration.reload() }
         pendingAgentID = nil
+        confirmsAgentChange = false
         if agentChangeInQuickPanel { selectQuickConfigurationNow(id) }
         else { selectNow(id) }
     }
@@ -128,19 +140,22 @@ final class AgentWorkspaceModel: ObservableObject {
         selection.refresh()
     }
     private func applySelection(_ state: AgentSelectionState) {
+        managedAgents = AgentRegistry.all.filter { state.managedIDs.contains($0.id) }
         availableAgents = state.available
         let ids = Set(state.available.map(\.id))
         instructions.restrictToAgents(ids)
         configuration.restrictToAgents(ids)
         skills.restrictToAgents(ids)
         skills.restrictToDetectedAgents(Set(state.detected.map(\.id)))
-        if state.hasDetected, agentID != "all", !ids.contains(agentID) {
+        if state.hasDetected, agentID != "all", !state.managedIDs.contains(agentID) {
             agentID = "all"
             defaults.set("all", forKey: "MusterSelectedAgent")
             // Keep the editor instance and its draft even if its Agent has gone away.
         }
-        if state.hasDetected, quickRulesAgentID != "all", !ids.contains(quickRulesAgentID) { selectQuickRulesAgent("all") }
-        if let pendingAgentID, !ids.contains(pendingAgentID), pendingAgentID != "all" {
+        if state.hasDetected, quickRulesAgentID != "all", !state.managedIDs.contains(quickRulesAgentID) { selectQuickRulesAgent("all") }
+        if state.hasDetected, quickConfigurationPrepared, !configuration.dirty,
+           !agentOptionIDs.contains(quickConfigurationAgentID) { selectQuickConfigurationNow("all") }
+        if let pendingAgentID, !state.managedIDs.contains(pendingAgentID), pendingAgentID != "all" {
             self.pendingAgentID = nil
             confirmsAgentChange = false
         }

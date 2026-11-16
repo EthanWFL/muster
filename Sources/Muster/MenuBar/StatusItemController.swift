@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import MusterCore
 import SwiftUI
 
 @MainActor
@@ -7,6 +9,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private var resignObserver: NSObjectProtocol?
+    private var sessionCountObservation: AnyCancellable?
     private let surfaceID = UUID()
     private let surface = PanelSurfaceState()
     private let management: ManagementWindowController
@@ -29,11 +32,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             button.image = MenuBarIcon.image
             button.imagePosition = .imageLeading
+            button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
             button.setAccessibilityLabel("Muster")
             button.target = self
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+
+        sessionCountObservation = Publishers.CombineLatest(model.$sessions, SettingsStore.shared.$language)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] sessions, _ in self?.updateSessionCounts(sessions) }
 
         SettingsCoordinator.shared.onOpenPanel = { [weak self] in
             // The quick panel always shows workspace tabs; keep the window's settings selection.
@@ -51,6 +59,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     deinit {
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+    }
+
+    private func updateSessionCounts(_ sessions: [Session]) {
+        let counts = SessionActivityCounts(sessions: sessions)
+        let summary = L10n.t("%d running sessions", counts.total)
+        statusItem.button?.title = " \(counts.total)"
+        statusItem.button?.toolTip = summary + "\n" + L10n.t("Running sessions of managed Agents only; history is excluded.")
+        statusItem.button?.setAccessibilityLabel("Muster · " + summary)
     }
 
     private func closeIfShown() {

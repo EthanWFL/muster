@@ -368,7 +368,13 @@ struct CompactMenuLabel: View {
         HStack(spacing: T.s1) {
             if let symbol { Image(systemName: symbol).font(T.seg) }
             if let agentID {
-                AgentLogo(agentID: agentID, mark: agentID == "pi" ? "π" : String(title.prefix(1)), size: 14)
+                // Native menu labels can ignore SwiftUI layout modifiers, just like menu items.
+                if let image = AgentLogos.menuImage(agentID, size: 14) {
+                    Image(nsImage: image).renderingMode(.original)
+                } else {
+                    Text(agentID == "pi" ? "π" : String(title.prefix(1)))
+                        .font(T.seg).frame(width: 14, height: 14)
+                }
             }
             Text(title).font(T.seg).lineLimit(1)
             Image(systemName: "chevron.down").font(T.glyph)

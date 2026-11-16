@@ -12,14 +12,12 @@ struct AgentWorkspaceView: View {
                 QuickAgentView(workspace: workspace, configuration: workspace.configuration, onOpenWindow: onOpenWindow)
             } else {
                 VStack(spacing: 0) {
-                    windowToolbar
-                    Hairline()
                     if workspace.section == .skills {
-                        SkillsView(model: workspace.skills, agentID: workspace.agentID)
+                        SkillsView(model: workspace.skills, agentID: "all", managedAgents: workspace.managedAgents)
                     } else {
                         ScrollView {
                             if workspace.section == .rules {
-                                InstructionsView(model: workspace.instructions, agentID: workspace.agentID == "all" ? nil : workspace.agentID,
+                                InstructionsView(model: workspace.instructions,
                                     availableAgentIDs: Set(workspace.availableAgents.map(\.id)))
                                     .padding(T.s4)
                             } else {
@@ -41,29 +39,6 @@ struct AgentWorkspaceView: View {
         } message: { Text(L10n.t("The current Agent has unsaved configuration changes.")) }
     }
 
-    private var windowToolbar: some View {
-        HStack(spacing: T.s3) {
-            agentScopePicker
-                .disabled(workspace.isCheckingAgents)
-            IconButton(symbol: "arrow.clockwise", label: L10n.t("Refresh installed Agents"), isBusy: workspace.isCheckingAgents) { workspace.refreshAgents() }
-            Spacer(minLength: 0)
-            SegmentedControl(items: AgentSection.allCases, selection: Binding(get: { workspace.section }, set: { workspace.selectSection($0) }),
-                             label: \.title).frame(width: 260)
-        }.padding(T.s3)
-    }
-
-    // Kept separate from the toolbar: one combined expression exceeded the CI type-check budget.
-    private var agentScopePicker: some View {
-        let ids: [String] = ["all"] + workspace.availableAgents.map(\.id)
-        let selection: Binding<String> = Binding(get: {
-            workspace.availableAgents.contains(where: { $0.id == workspace.agentID }) ? workspace.agentID : "all"
-        }, set: { workspace.selectAgent($0) })
-        return InlineSelect(items: ids,
-            label: { $0 == "all" ? L10n.t("All Agents") : (AgentRegistry.agent($0)?.name ?? $0) },
-            icon: { $0 == "all" ? nil : $0 },
-            selection: selection)
-    }
-
     private var configuration: some View {
         AgentConfigurationContent(workspace: workspace, configuration: workspace.configuration)
     }
@@ -73,20 +48,34 @@ struct AgentWorkspaceView: View {
 private struct AgentConfigurationContent: View {
     @ObservedObject var workspace: AgentWorkspaceModel
     @ObservedObject var configuration: ConfigurationModel
-    @ViewBuilder var body: some View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: T.s3) {
+            if workspace.agentID != "all" {
+                Button { workspace.selectAgent("all") } label: {
+                    Label(L10n.t("All configurations"), systemImage: "chevron.left")
+                }.buttonStyle(PillButtonStyle(kind: .quiet))
+            }
+            content
+        }
+    }
+    @ViewBuilder private var content: some View {
         if workspace.agentID == "all" {
             AgentConfigurationOverview(workspace: workspace, configuration: configuration)
+        } else if !workspace.availableAgents.contains(where: { $0.id == workspace.agentID }) {
+            EmptyState(title: AgentRegistry.agent(workspace.agentID)?.name ?? workspace.agentID,
+                       message: L10n.t("This Agent is selected in Settings but was not detected on this Mac."))
         } else if configuration.targets.contains(where: { $0.id == workspace.agentID }) {
             ConfigurationView(model: configuration, showsAgentPicker: false)
         } else {
-            EmptyState(title: L10n.t("No configurations found"), message: L10n.t("Agents with existing configuration files show up here."))
+            EmptyState(title: L10n.t("No configurations found"), message: L10n.t("No configuration file was found for this Agent."))
         }
     }
 }
 
-private struct AgentConfigurationOverview: View {
+struct AgentConfigurationOverview: View {
     @ObservedObject var workspace: AgentWorkspaceModel
     @ObservedObject var configuration: ConfigurationModel
+    var onSelect: ((String) -> Void)? = nil
     private var targets: [AgentConfiguration] {
         let ids = Set(workspace.availableAgents.map(\.id))
         return configuration.targets.filter { ids.contains($0.id) }
@@ -106,16 +95,21 @@ private struct AgentConfigurationOverview: View {
                 }
                 if let error = configuration.errorMessage { Text(error).font(T.small).foregroundStyle(T.red) }
             }
-            if targets.isEmpty {
-                EmptyState(title: L10n.t("No configurations found"), message: L10n.t("Agents with existing configuration files show up here."))
+            if workspace.managedAgents.isEmpty {
+                EmptyState(title: L10n.t("No Agents selected for Muster."), message: L10n.t("Choose Agents in Settings → Agent management."))
             }
-            ForEach(targets) { target in
-                Button { workspace.selectAgent(target.id) } label: {
+            ForEach(workspace.managedAgents) { agent in
+                let target = targets.first { $0.id == agent.id }
+                Button { (onSelect ?? workspace.selectAgent)(agent.id) } label: {
                     HStack {
-                        AgentLogo(agentID: target.id, mark: String(target.name.prefix(1)))
+                        AgentLogo(agentID: agent.id, mark: String(agent.name.prefix(1)))
                         VStack(alignment: .leading, spacing: T.s1) {
-                            Text(target.name).font(T.body.weight(.medium))
-                            Text((target.path as NSString).abbreviatingWithTildeInPath).font(T.monoMicro).foregroundStyle(T.muted)
+                            Text(agent.name).font(T.body.weight(.medium))
+                            Text(target.map { ($0.path as NSString).abbreviatingWithTildeInPath }
+                                 ?? L10n.t(workspace.availableAgents.contains { $0.id == agent.id }
+                                           ? "No configuration file was found for this Agent."
+                                           : "This Agent is selected in Settings but was not detected on this Mac."))
+                                .font(T.monoMicro).foregroundStyle(T.muted).lineLimit(2)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(T.muted)

@@ -26,6 +26,7 @@ struct PanelView: View {
                     Hairline(vertical: true)
                     pageAndFooter
                 }
+                .clipped()
             }
         }
         .frame(width: presentation == .popover ? 420 : nil)
@@ -61,6 +62,7 @@ struct PanelView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
             .id(settings.language.rawValue + "-" + String(settings.comfortableLayout))
             .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: isShowingSettings)
             if let notice = model.notice {

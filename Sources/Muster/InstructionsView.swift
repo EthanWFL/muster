@@ -41,12 +41,20 @@ struct InstructionsView: View {
         }
         .onAppear {
             model.loadIfNeeded()
-            if (compact || model.editorFocusRequest > 0) && openSetID == nil { openSetID = model.activeSetID; editingName = model.activeSetName }
+            if compact { openSetID = nil }
+            else if model.editorFocusRequest > 0 && openSetID == nil {
+                openSetID = model.activeSetID; editingName = model.activeSetName
+            }
         }
         .onChange(of: model.activeSetID) { _, id in
-            if compact || openSetID != nil { openSetID = id; editingName = model.activeSetName }
+            if compact {
+                if openSetID != id { openSetID = nil }
+            } else if openSetID != nil { openSetID = id; editingName = model.activeSetName }
         }
-        .onChange(of: model.editorFocusRequest) { _, _ in openSetID = model.activeSetID; editingName = model.activeSetName }
+        .onChange(of: model.editorFocusRequest) { _, _ in
+            guard !compact else { return }
+            openSetID = model.activeSetID; editingName = model.activeSetName
+        }
     }
 
     private var content: some View {
@@ -196,7 +204,11 @@ struct InstructionsView: View {
     private func setHeader(_ set: InstructionSet, active: Bool, open: Bool) -> some View {
         let preview = model.previewText(set.id)
         return HStack(spacing: T.s2) {
-            Button { toggle(set) } label: {
+            Button {
+                if compact {
+                    if set.id != model.activeSetID { commitRename(); model.selectSet(set.id) }
+                } else { toggle(set) }
+            } label: {
                 HStack(spacing: T.s2) {
                     Image(systemName: active ? "largecircle.fill.circle" : "circle")
                         .font(T.glyph)
@@ -207,7 +219,7 @@ struct InstructionsView: View {
                             .font(T.body)
                             .foregroundStyle(active ? T.fg : T.fg2)
                             .lineLimit(1)
-                        if !preview.isEmpty && !(compact && open) {
+                        if !compact && !preview.isEmpty {
                             Text(preview)
                                 .font(T.micro)
                                 .foregroundStyle(T.muted)

@@ -57,7 +57,7 @@ struct SessionsView: View {
                                            customTitle: titles[session.key])
                                     .tag(session.key)
                                     .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                                    .onTapGesture(count: 2) { model.jumpToTerminal(session) }
+                                    .onTapGesture(count: 2) { model.openClient(session) }
                                     .contextMenu {
                                         if let onOpenLibrary {
                                             Button(L10n.t("Edit session details")) {
@@ -65,9 +65,8 @@ struct SessionsView: View {
                                                 onOpenLibrary()
                                             }
                                         }
-                                        Button(L10n.t("Focus terminal")) { model.jumpToTerminal(session) }
-                                        if session.resumeCommand != nil {
-                                            Button(L10n.t("Copy resume command")) { model.copyResume(session) }
+                                        if session.isProcessAlive, let client = session.client {
+                                            Button(L10n.t("Open %@", client.name)) { model.openClient(session) }
                                         }
                                     }
                             }
@@ -81,7 +80,8 @@ struct SessionsView: View {
                 .focused($focus, equals: .list)
                 .onKeyPress(.return) {
                     guard let session = visibleSessions.first(where: { $0.key == model.selectedSessionKey }) else { return .ignored }
-                    model.jumpToTerminal(session)
+                    guard session.isProcessAlive, session.client != nil else { return .ignored }
+                    model.openClient(session)
                     return .handled
                 }
                 .accessibilityLabel(L10n.t("Sessions"))
@@ -218,14 +218,7 @@ private struct SessionRow: View {
             .help(session.isProcessAlive
                   ? L10n.t("Process is present. Activity does not indicate task completion.")
                   : L10n.t("Transcript only. No unique process association was found."))
-            IconButton(symbol: "terminal", label: L10n.t("Focus terminal"), tint: .secondary) {
-                model.jumpToTerminal(session)
-            }
-            if session.resumeCommand != nil {
-                IconButton(symbol: "arrow.uturn.backward.circle", label: L10n.t("Copy resume command"), tint: .secondary) {
-                    model.copyResume(session)
-                }
-            }
+            SessionClientButton(session: session) { model.openClient(session) }
         }
         .frame(minHeight: T.rowDouble)
         .contentShape(Rectangle())

@@ -25,6 +25,7 @@ public final class SessionStore: @unchecked Sendable {
     public func refresh(transcripts: [Session], processes: [Session]) -> [Session] {
         lock.lock(); defer { lock.unlock() }
         mergeDiskLocked(transcripts)
+        for key in records.keys { records[key]?.client = nil }
         let now = clock.now()
         let previousLinks = records
         // Reconsider inferred links when new candidates appear. Keep dead identities
@@ -35,14 +36,16 @@ public final class SessionStore: @unchecked Sendable {
                   probe.isAlive(pid: pid, startTime: record.pidStartTime) else { continue }
             record.pid = nil
             record.pidStartTime = nil
+            record.client = nil
             records[key] = record
         }
         var matched: Set<String> = []
         for process in processes {
             guard let pid = process.pid, let start = process.pidStartTime else { continue }
-            if records.values.contains(where: {
-                $0.agent == process.agent && $0.pid == pid && $0.pidStartTime == start
-            }) {
+            if let key = records.first(where: {
+                $0.value.agent == process.agent && $0.value.pid == pid && $0.value.pidStartTime == start
+            })?.key {
+                records[key]?.client = process.client
                 matched.insert(process.key)
                 continue
             }
@@ -56,6 +59,7 @@ public final class SessionStore: @unchecked Sendable {
             guard peers.count == 1, candidates.count == 1, var record = candidates.first else { continue }
             record.pid = pid
             record.pidStartTime = start
+            record.client = process.client
             record.startedAt = min(record.startedAt, process.startedAt)
             records[record.key] = record
             inferredKeys.insert(record.key)
@@ -87,13 +91,14 @@ public final class SessionStore: @unchecked Sendable {
                    !probe.isAlive(pid: pid, startTime: existing.pidStartTime) {
                     existing.pid = nil
                     existing.pidStartTime = nil
+                    existing.client = nil
                 }
                 records[session.key] = Session(
                     id: existing.id, agent: existing.agent,
                     cwd: existing.cwd.isEmpty ? session.cwd : existing.cwd,
                     pid: existing.pid, pidStartTime: existing.pidStartTime,
                     startedAt: min(existing.startedAt, session.startedAt),
-                    lastActivityAt: max(existing.lastActivityAt, session.lastActivityAt))
+                    lastActivityAt: max(existing.lastActivityAt, session.lastActivityAt), client: existing.client)
             } else { records[session.key] = session }
         }
         prune(now: clock.now())
@@ -109,6 +114,7 @@ public final class SessionStore: @unchecked Sendable {
         var result = session
         let quiet = now.timeIntervalSince(session.lastActivityAt)
         result.isProcessAlive = session.pid.map { probe.isAlive(pid: $0, startTime: session.pidStartTime) } ?? false
+        if !result.isProcessAlive { result.client = nil }
         if session.pid != nil && !result.isProcessAlive {
             result.state = .ended
         } else if !session.hasTranscript {

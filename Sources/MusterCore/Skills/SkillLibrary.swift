@@ -20,6 +20,10 @@ public actor SkillLibrary {
         let id: UUID
         let changes: [Change]
     }
+    private struct LocalTransition: Codable {
+        let entry: SkillSuspension
+        let restoring: Bool
+    }
     private struct State: Codable {
         var schema = 1
         var revision: UInt64 = 0
@@ -31,12 +35,37 @@ public actor SkillLibrary {
         /// It outlives the deployment log, because the user's original folder must never be pruned
         /// just because 20 newer transactions pushed the adoption record out of `history`.
         var restores: [String: String]? = nil
+        /// Original folders retained after ownership is relinquished; never auto-pruned.
+        var retainedBackups: [String]? = nil
+        var suspended: [SkillSuspension]? = nil
+        var pendingLocal: LocalTransition? = nil
     }
 
     public init(root: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Muster/library")) { self.root = root }
 
     public func load() throws -> SkillLibrarySnapshot { try locked { snapshot($0) } }
+
+    /// Only forget stale metadata after rechecking the exact entry shown to the user.
+    /// Foreign files and displaced originals are never removed or restored by this operation.
+    public func releaseDeployment(_ inspection: SkillDeploymentInspection) throws -> SkillLibrarySnapshot {
+        try locked { state in
+            guard inspection.status == .missing || inspection.status == .changed,
+                  let deployment = state.deployments.first(where: { $0.id == inspection.id }),
+                  deployment == inspection.deployment,
+                  inspect(deployment) == inspection else { throw SkillError.changed }
+            let invalidated = state.history.filter { $0.changes.contains { $0.path == deployment.path } }
+            var retained = Set(state.retainedBackups ?? [])
+            retained.formUnion(invalidated.flatMap { $0.changes.compactMap(\.backup) })
+            if let backup = state.restores?[deployment.path] { retained.insert(backup) }
+            state.retainedBackups = retained.sorted()
+            state.restores?[deployment.path] = nil
+            state.history.removeAll { transaction in invalidated.contains { $0.id == transaction.id } }
+            state.deployments.removeAll { $0.id == deployment.id }
+            try save(&state)
+            return snapshot(state)
+        }
+    }
 
     public func content(_ id: UUID) throws -> SkillContent {
         try locked { state in
@@ -157,7 +186,8 @@ public actor SkillLibrary {
         try locked { state in
             guard let index = state.skills.firstIndex(where: { $0.id == id }), state.skills[index].revision == expectedRevision
             else { throw SkillError.changed }
-            guard !state.deployments.contains(where: { $0.skillID == id }) else { throw SkillError.deployed }
+            guard !state.deployments.contains(where: { $0.skillID == id }),
+                  state.suspended?.contains(where: { $0.deployment?.skillID == id }) != true else { throw SkillError.deployed }
             state.skills.remove(at: index)
             // Undo can only rebuild things that still exist, so history mentioning this skill in
             // either direction is dropped rather than left to fail on the next restore attempt.
@@ -183,7 +213,8 @@ public actor SkillLibrary {
             guard state.skills[index].name != name else { return snapshot(state) }
             guard !state.skills.contains(where: { $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame })
             else { throw SkillError.occupied }
-            guard !state.deployments.contains(where: { $0.skillID == id }) else { throw SkillError.deployed }
+            guard !state.deployments.contains(where: { $0.skillID == id }),
+                  state.suspended?.contains(where: { $0.deployment?.skillID == id }) != true else { throw SkillError.deployed }
             guard !fm.fileExists(atPath: draftURL(id).path) else { throw SkillError.changed }
             var next = try verifiedFiles(id, expectedRevision)
             let (text, _) = try SkillFiles.document(next)
@@ -281,33 +312,187 @@ public actor SkillLibrary {
     }
 
     public func discover(targets: [SkillTarget]) throws -> [SkillDiscovery] {
-        try locked { state in
-            var found: [String: SkillDiscovery] = [:]
-            for target in targets {
-                for directory in Set([target.directory] + target.discoveryDirectories) {
-                    guard let entries = try? fm.contentsOfDirectory(at: URL(fileURLWithPath: directory), includingPropertiesForKeys: nil) else { continue }
-                    for entry in entries.sorted(by: { $0.path < $1.path }).prefix(2_000) where !entry.lastPathComponent.hasPrefix(".") {
-                        let file = entry.appendingPathComponent("SKILL.md")
-                        guard fm.fileExists(atPath: file.path) else { continue }
-                        if var existing = found[entry.path] {
-                            existing.readers = Array(Set(existing.readers + [target.id])).sorted()
-                            found[entry.path] = existing
-                            continue
-                        }
-                        let attrs = try? fm.attributesOfItem(atPath: file.path)
-                        let size = (attrs?[.size] as? NSNumber)?.intValue ?? Int.max
-                        let document = size <= 1_048_576 && attrs?[.type] as? FileAttributeType == .typeRegular
-                            ? (try? SkillDocument(String(contentsOf: file, encoding: .utf8))) : nil
-                        found[entry.path] = SkillDiscovery(path: entry.path, name: document?.name ?? entry.lastPathComponent,
-                            summary: document?.summary ?? "", readers: [target.id],
-                            isShared: targets.contains { $0.directory == directory && !$0.sharedReaders.isEmpty },
-                            managed: state.deployments.contains { entryIdentity($0.path) == entryIdentity(entry.path) },
-                            issue: document == nil ? SkillError.invalidDocument.rawValue : document?.warning)
+        try locked { state in try discoveries(targets: targets, state: state) }
+    }
+
+    private func discoveries(targets: [SkillTarget], state: State) throws -> [SkillDiscovery] {
+        var found: [String: SkillDiscovery] = [:]
+        var contents: [String: (SkillDocument, String)] = [:]
+        for target in targets {
+            for directory in Set([target.directory] + target.discoveryDirectories) {
+                guard let entries = try? fm.contentsOfDirectory(at: URL(fileURLWithPath: directory), includingPropertiesForKeys: nil) else { continue }
+                for entry in entries.sorted(by: { $0.path < $1.path }).prefix(2_000) where !entry.lastPathComponent.hasPrefix(".") {
+                    guard fm.fileExists(atPath: entry.appendingPathComponent("SKILL.md").path) else { continue }
+                    if var existing = found[entry.path] {
+                        existing.readers = Array(Set(existing.readers + [target.id])).sorted()
+                        found[entry.path] = existing
+                        continue
                     }
+                    let resolved = entry.resolvingSymlinksInPath()
+                    let fingerprint = try? SkillFiles.fingerprint(entry)
+                    var issue: String?
+                    if contents[resolved.path] == nil {
+                        do {
+                            let files = try SkillFiles.read(resolved)
+                            contents[resolved.path] = (try SkillFiles.document(files).1, SkillFiles.hash(files))
+                        } catch { issue = error.localizedDescription }
+                    }
+                    let content = contents[resolved.path]
+                    found[entry.path] = SkillDiscovery(path: entry.path, name: content?.0.name ?? entry.lastPathComponent,
+                        summary: content?.0.summary ?? "", readers: [target.id],
+                        isShared: targets.contains { $0.directory == directory && !$0.sharedReaders.isEmpty },
+                        managed: state.deployments.contains {
+                            entryIdentity($0.path) == entryIdentity(entry.path) && inspect($0).status == .active
+                        }, issue: issue ?? content?.0.warning, fingerprint: fingerprint, digest: content?.1,
+                        resolvedPath: resolved.path)
                 }
             }
-            return found.values.sorted { $0.path < $1.path }
         }
+        for entry in state.suspended ?? [] where targets.contains(where: { $0.id == entry.targetID }) {
+            // Keep disabled originals visible, even if another tool now occupies their old path.
+            let backup = URL(fileURLWithPath: entry.backup)
+            let intact = (try? SkillFiles.fingerprint(backup)) == entry.fingerprint
+            let item = SkillDiscovery(path: entry.path, name: entry.name, summary: entry.summary,
+                readers: [entry.targetID], isShared: false, managed: false,
+                issue: intact ? nil : SkillError.changed.rawValue, fingerprint: entry.fingerprint,
+                digest: intact ? entry.digest : nil, resolvedPath: entry.resolvedSource, suspendedID: entry.id)
+            found["suspended:" + entry.id.uuidString] = item
+        }
+        return found.values.sorted { $0.path < $1.path }
+    }
+
+    /// Snapshot the complete discovered bundle before deploying it anywhere else.
+    public func importDiscovered(_ discovery: SkillDiscovery) throws -> SkillRecord {
+        let candidate: SkillCandidate = try locked { state in
+            let directory: URL
+            if let id = discovery.suspendedID {
+                guard let saved = state.suspended?.first(where: { $0.id == id }),
+                      try SkillFiles.fingerprint(URL(fileURLWithPath: saved.backup)) == saved.fingerprint else { throw SkillError.changed }
+                directory = saved.fingerprint.hasPrefix("link:")
+                    ? URL(fileURLWithPath: saved.resolvedSource) : URL(fileURLWithPath: saved.backup)
+            } else {
+                let url = URL(fileURLWithPath: discovery.path)
+                guard try SkillFiles.fingerprint(url) == discovery.fingerprint,
+                      url.resolvingSymlinksInPath().path == discovery.resolvedPath else { throw SkillError.changed }
+                directory = url.resolvingSymlinksInPath()
+            }
+            let files = try SkillFiles.read(directory)
+            let (_, document) = try SkillFiles.document(files)
+            let digest = SkillFiles.hash(files)
+            guard discovery.digest == digest, discovery.name == document.name else { throw SkillError.changed }
+            return SkillCandidate(directory: directory, name: document.name, summary: document.summary,
+                license: document.license, warning: document.warning, digest: digest, files: files.map(\.path),
+                source: SkillSource(kind: .local, location: discovery.path))
+        }
+        let existing = try load().skills.first { $0.name == candidate.name && $0.revision == candidate.digest }
+        if let existing { return existing }
+        let snapshot = try importSkill(candidate)
+        guard let record = snapshot.skills.first(where: { $0.name == candidate.name && $0.revision == candidate.digest }) else { throw SkillError.missing }
+        return record
+    }
+
+    public func suspendDiscovered(_ discovery: SkillDiscovery, targetID: String, targets: [SkillTarget]) throws -> SkillLibrarySnapshot {
+        try locked { state in
+            guard targets.contains(where: { $0.id == targetID }) else { throw SkillError.outsideScope }
+            let entries = try discoveries(targets: targets, state: state)
+            guard let reviewed = entries.first(where: { $0.id == discovery.id }),
+                  reviewed.fingerprint == discovery.fingerprint, reviewed.digest == discovery.digest,
+                  reviewed.resolvedPath == discovery.resolvedPath else { throw SkillError.changed }
+            let matches = entries.filter { $0.suspendedID == nil && $0.isSameSkill(as: discovery) && $0.readers.contains(targetID) }
+            guard matches.count == 1, let entry = matches.first, let fingerprint = entry.fingerprint,
+                  let digest = entry.digest, let resolved = entry.resolvedPath else { throw SkillError.localSkillShared }
+            guard !entry.isShared, entry.readers == [targetID], !entries.contains(where: {
+                $0.suspendedID == nil && $0.readers.contains(where: { $0 != targetID }) &&
+                    (entryIdentity($0.path) == entryIdentity(entry.path) ||
+                     (fingerprint.hasPrefix("tree:") && $0.resolvedPath == resolved))
+            }) else { throw SkillError.localSkillShared }
+            guard state.suspended?.contains(where: { $0.path == entry.path }) != true else { throw SkillError.localSkillOccupied }
+            let id = UUID()
+            let backup = root.appendingPathComponent("disabled/\(id.uuidString)/\(URL(fileURLWithPath: entry.path).lastPathComponent)")
+            try fm.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let saved = SkillSuspension(id: id, path: entry.path,
+                parent: URL(fileURLWithPath: entry.path).deletingLastPathComponent().resolvingSymlinksInPath().path,
+                backup: backup.path, backupParent: backup.deletingLastPathComponent().resolvingSymlinksInPath().path,
+                fingerprint: fingerprint, targetID: targetID, name: entry.name, summary: entry.summary,
+                digest: digest, resolvedSource: resolved,
+                deployment: state.deployments.first { $0.path == entry.path && inspect($0).status == .active }, restoreBackup: state.restores?[entry.path])
+            guard SkillFiles.hash(try SkillFiles.read(URL(fileURLWithPath: resolved))) == digest else { throw SkillError.changed }
+            try transitionLocal(LocalTransition(entry: saved, restoring: false), state: &state)
+            return snapshot(state)
+        }
+    }
+
+    public func restoreDiscovered(_ id: UUID, targetID: String, targets: [SkillTarget]) throws -> SkillLibrarySnapshot {
+        try locked { state in
+            guard let saved = state.suspended?.first(where: { $0.id == id }), saved.targetID == targetID,
+                  let target = targets.first(where: { $0.id == targetID }),
+                  ([target.directory] + target.discoveryDirectories).contains(where: {
+                      URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == saved.parent
+                  }) else { throw SkillError.outsideScope }
+            guard !state.deployments.contains(where: { $0.path == saved.path }),
+                  try SkillFiles.fingerprint(URL(fileURLWithPath: saved.path)) == "missing" else { throw SkillError.localSkillOccupied }
+            try transitionLocal(LocalTransition(entry: saved, restoring: true), state: &state)
+            return snapshot(state)
+        }
+    }
+
+    private func checkLocalParents(_ entry: SkillSuspension) throws {
+        guard URL(fileURLWithPath: entry.path).deletingLastPathComponent().resolvingSymlinksInPath().path == entry.parent,
+              URL(fileURLWithPath: entry.backup).deletingLastPathComponent().resolvingSymlinksInPath().path == entry.backupParent,
+              entry.backupParent.hasPrefix(root.appendingPathComponent("disabled").resolvingSymlinksInPath().path + "/") else { throw SkillError.changed }
+    }
+
+    private func transitionLocal(_ transition: LocalTransition, state: inout State) throws {
+        let entry = transition.entry
+        try checkLocalParents(entry)
+        let from = transition.restoring ? entry.backup : entry.path
+        let to = transition.restoring ? entry.path : entry.backup
+        guard try SkillFiles.fingerprint(URL(fileURLWithPath: from)) == entry.fingerprint,
+              try SkillFiles.fingerprint(URL(fileURLWithPath: to)) == "missing" else { throw SkillError.changed }
+        state.pendingLocal = transition
+        try persist(state)
+        // Atomic no-overwrite rename preserves the exact folder/link. Cross-volume moves fail intact.
+        do {
+            try checkLocalParents(entry)
+            guard try SkillFiles.fingerprint(URL(fileURLWithPath: from)) == entry.fingerprint else { throw SkillError.changed }
+            guard renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            try recoverLocal(&state)
+        } catch {
+            try recoverLocal(&state)
+            throw error
+        }
+    }
+
+    private func recoverLocal(_ state: inout State) throws {
+        guard let pending = state.pendingLocal else { return }
+        let entry = pending.entry
+        try checkLocalParents(entry)
+        let original = try SkillFiles.fingerprint(URL(fileURLWithPath: entry.path))
+        let backup = try SkillFiles.fingerprint(URL(fileURLWithPath: entry.backup))
+        let completed = pending.restoring ? (original == entry.fingerprint && backup == "missing")
+                                         : (original == "missing" && backup == entry.fingerprint)
+        let untouched = pending.restoring ? (original == "missing" && backup == entry.fingerprint)
+                                         : (original == entry.fingerprint && backup == "missing")
+        guard completed || untouched else { throw SkillError.recovery }
+        if completed {
+            if pending.restoring {
+                state.suspended?.removeAll { $0.id == entry.id }
+                if let deployment = entry.deployment { state.deployments.append(deployment) }
+                if let restore = entry.restoreBackup { state.restores = (state.restores ?? [:]).merging([entry.path: restore]) { $1 } }
+            } else {
+                state.suspended = (state.suspended ?? []) + [entry]
+                state.deployments.removeAll { $0.path == entry.path }
+                let obsolete = state.history.filter { $0.changes.contains { $0.path == entry.path } }
+                var retained = Set(state.retainedBackups ?? [])
+                retained.formUnion(obsolete.flatMap { $0.changes.compactMap(\.backup) })
+                if let restore = state.restores?[entry.path] { retained.insert(restore) }
+                state.retainedBackups = retained.sorted()
+                state.restores?[entry.path] = nil
+                state.history.removeAll { transaction in obsolete.contains { $0.id == transaction.id } }
+            }
+        }
+        state.pendingLocal = nil
+        try save(&state)
     }
 
     private func planItems(skillID: UUID, desired: [String: SkillInstallMode], targets: [SkillTarget],
@@ -336,7 +521,11 @@ public actor SkillLibrary {
             let replaces = occupied && adopting.contains(path) && Self.isSkillEntry(url)
             if before == after && current == after?.fingerprint { continue }
             var conflict: String?
-            if let before, current != before.fingerprint { conflict = SkillError.changed.rawValue }
+            if let before, current != before.fingerprint {
+                conflict = current == "missing"
+                    ? "This deployment is missing. Use its Agent icon to clear the stale record or redeploy."
+                    : "This deployment was changed outside Muster. Use its Agent icon to release management or review redeployment."
+            }
             if occupied && !replaces {
                 conflict = Self.isSkillEntry(url)
                     ? SkillError.occupied.rawValue
@@ -550,7 +739,7 @@ public actor SkillLibrary {
     /// on systems where `/var` is a symlink to `/private/var`.
     private func pruneBackups(_ state: State) {
         let live = Set((state.history.flatMap { $0.changes.compactMap(\.backup) }
-            + Array((state.restores ?? [:]).values)).compactMap(transactionID(ofBackup:)))
+            + Array((state.restores ?? [:]).values) + (state.retainedBackups ?? [])).compactMap(transactionID(ofBackup:)))
         let directory = root.appendingPathComponent("backups")
         guard let children = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
         for child in children {
@@ -569,9 +758,23 @@ public actor SkillLibrary {
         return parts[index + 1]
     }
 
+    private func inspect(_ deployment: SkillDeployment) -> SkillDeploymentInspection {
+        let url = URL(fileURLWithPath: deployment.path)
+        let fingerprint = (try? SkillFiles.fingerprint(url)) ?? "unreadable"
+        let status: SkillDeploymentInspection.Status
+        if fingerprint == "unreadable" { status = .unreadable }
+        else if fingerprint == "missing" { status = .missing }
+        else if fingerprint == deployment.fingerprint && fm.fileExists(atPath: deployment.path) { status = .active }
+        else { status = .changed }
+        return SkillDeploymentInspection(deployment: deployment, fingerprint: fingerprint,
+            resolvedParent: url.deletingLastPathComponent().resolvingSymlinksInPath().path, status: status)
+    }
+
     private func snapshot(_ state: State) -> SkillLibrarySnapshot {
         SkillLibrarySnapshot(revision: state.revision, skills: state.skills.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
-            deployments: state.deployments, canUndo: !state.history.isEmpty)
+            deployments: state.deployments, canUndo: !state.history.isEmpty,
+            deploymentInspections: Dictionary(uniqueKeysWithValues: state.deployments.map { ($0.id, inspect($0)) }),
+            suspendedSkillIDs: Set((state.suspended ?? []).compactMap { $0.deployment?.skillID }))
     }
     private func save(_ state: inout State) throws { state.revision += 1; try persist(state) }
     private func persist(_ state: State) throws {
@@ -608,6 +811,7 @@ public actor SkillLibrary {
             for record in state.skills { try SkillDocument.validateName(record.name) }
         } catch { throw SkillError.corrupt }
         try recover(&state)
+        try recoverLocal(&state)
         return try operation(&state)
     }
 }

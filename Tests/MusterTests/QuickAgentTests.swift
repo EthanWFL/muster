@@ -76,6 +76,60 @@ import MusterCore
         #expect(f.workspace.agentID == "pi" && f.configuration.selected?.id == "pi")
     }
 
+    @Test func bothPickersUseTheSettingsSelectionEvenWithoutConfigurationFiles() async throws {
+        let f = try QuickAgentFixture(detected: ["codex", "pi", "hermes"])
+        defer { f.cleanup() }
+        await f.load()
+        f.workspace.selection.setManaged("codex", false)
+        f.workspace.selection.setManaged("cursor", true) // Selected, but not detected.
+        #expect(Set(f.workspace.agentOptionIDs) == ["all", "pi", "hermes", "cursor"])
+        #expect(f.workspace.quickConfigurationTargets.map(\.id) == ["pi"])
+        f.workspace.selectQuickRulesAgent("hermes")
+        f.workspace.selectQuickSection(.configuration)
+        f.workspace.selectQuickConfigurationAgent("hermes")
+        #expect(f.workspace.quickRulesAgentID == "hermes")
+        #expect(f.workspace.quickConfigurationAgentID == "hermes")
+        f.workspace.prepareQuickConfiguration()
+        #expect(f.workspace.quickConfigurationAgentID == "hermes")
+        f.workspace.selectQuickConfigurationAgent("cursor")
+        f.workspace.selectAgent("cursor")
+        #expect(f.workspace.quickConfigurationAgentID == "cursor" && f.workspace.agentID == "cursor")
+        #expect(!f.workspace.availableAgents.contains { $0.id == "cursor" })
+        f.workspace.selection.selectNone()
+        #expect(f.workspace.agentOptionIDs == ["all"])
+        #expect(f.workspace.quickRulesAgentID == "all" && f.workspace.quickConfigurationAgentID == "all")
+    }
+
+    @Test func configurationAllOptionPreservesTheUnsavedChangeGuardAndIsRemembered() async throws {
+        let f = try QuickAgentFixture()
+        defer { f.cleanup() }
+        await f.load()
+        f.workspace.selectQuickSection(.configuration)
+        f.configuration.model = "Do not discard"
+        f.workspace.selectQuickConfigurationAgent("all")
+        #expect(f.workspace.confirmsAgentChange && f.workspace.quickConfigurationAgentID == "codex")
+        f.workspace.cancelAgentChange()
+        #expect(f.configuration.dirty)
+        f.workspace.selectQuickConfigurationAgent("all")
+        f.workspace.resolveAgentChange(save: true)
+        #expect(!f.configuration.dirty && !f.workspace.confirmsAgentChange)
+        #expect(f.workspace.quickConfigurationAgentID == "all")
+        f.workspace.prepareQuickConfiguration()
+        #expect(f.workspace.quickConfigurationAgentID == "all")
+        #expect(f.defaults.string(forKey: "MusterQuickConfigurationAgent") == "all")
+    }
+
+    @Test func preparationBeforeDetectionDoesNotReplaceTheRememberedAgent() async throws {
+        let f = try QuickAgentFixture()
+        defer { f.cleanup() }
+        f.defaults.set("pi", forKey: "MusterQuickConfigurationAgent")
+        f.workspace.selectQuickSection(.configuration)
+        #expect(f.defaults.string(forKey: "MusterQuickConfigurationAgent") == "pi")
+        await f.load()
+        f.workspace.prepareQuickConfiguration()
+        #expect(f.workspace.quickConfigurationAgentID == "pi")
+    }
+
     @Test func scopeChangeKeepsAHiddenConfigurationDraftUntilResolved() async throws {
         let f = try QuickAgentFixture()
         defer { f.cleanup() }
@@ -102,7 +156,7 @@ import MusterCore
     let configuration: ConfigurationModel
     let skills: SkillsModel
     let workspace: AgentWorkspaceModel
-    init() throws {
+    init(detected: [String] = ["codex", "pi"]) throws {
         suite = "muster-quick-agent-" + UUID().uuidString
         defaults = UserDefaults(suiteName: suite)!
         root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
@@ -118,7 +172,7 @@ import MusterCore
             detectTargets: { AgentConfiguration.detect(home: folder.path, environment: [:]) })
         skills = SkillsModel(library: SkillLibrary(root: root.appendingPathComponent("skills")), targets: [])
         workspace = AgentWorkspaceModel(instructions: rules, configuration: configuration, skills: skills, defaults: defaults,
-            detectInstalledAgents: { AgentRegistry.all.filter { ["codex", "pi"].contains($0.id) } })
+            detectInstalledAgents: { AgentRegistry.all.filter { detected.contains($0.id) } })
     }
     func load() async {
         workspace.load(syncWindowSelection: false)

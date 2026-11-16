@@ -30,8 +30,8 @@ extension EnvironmentValues {
 /// One reusable window; all editable state remains in the shared model when it closes.
 @MainActor
 final class ManagementWindowController: NSWindowController, NSWindowDelegate {
-    private static let defaultSize = NSSize(width: 1120, height: 740)
-    private static let minimumSize = NSSize(width: 960, height: 600)
+    private static let defaultSize = NSSize(width: 1000, height: 680)
+    private static let minimumSize = NSSize(width: 880, height: 560)
     private let model: PanelModel
     private let surfaceID = UUID()
     private let surface = PanelSurfaceState()
@@ -52,7 +52,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
     func open() {
         if window == nil {
             let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
-                                  styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
             window.title = "Muster"
             // The menu bar panel lives on every Space; the management window must follow it
@@ -75,6 +75,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
             window.minSize = Self.minimumSize
             window.isReleasedWhenClosed = false
             window.delegate = self
+            window.setFrame(NSRect(origin: window.frame.origin, size: Self.defaultSize), display: false)
             window.center()
             window.setFrameAutosaveName("MusterManagementWindow")
             self.window = window

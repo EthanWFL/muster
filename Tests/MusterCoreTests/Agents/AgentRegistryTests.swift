@@ -13,6 +13,26 @@ import Testing
         #expect(AgentRegistry.kind(forArgs: ["node", "my-codex-server.js"]) == nil)
     }
 
+    @Test func skillTargetsIncludeVerifiedAgentDirectoriesAndRespectCustomHomes() throws {
+        let targets = AgentRegistry.skillTargets(home: "/home/test", environment: [:])
+        #expect(Set(targets.map(\.id)) == ["claude", "codex", "pi", "dsh", "cursor", "hermes"])
+        #expect(targets.first { $0.id == "dsh" }?.directory == "/home/test/.dsh/skills")
+        #expect(targets.first { $0.id == "dsh" }?.discoveryDirectories == ["/home/test/.agents/skills"])
+        #expect(targets.first { $0.id == "hermes" }?.directory == "/home/test/.hermes/skills")
+        #expect(targets.first { $0.id == "cursor" }?.directory == "/home/test/.cursor/skills")
+        #expect(targets.first { $0.id == "codex" }?.sharedReaders.contains("dsh") == true)
+        #expect(targets.first { $0.id == "claude" }?.sharedReaders.contains("cursor") == true)
+        let custom = AgentRegistry.skillTargets(home: "/home/test", environment: [
+            "DSH_HOME": "~/custom/dsh", "DSH_AGENTS_HOME": "/other/shared", "HERMES_HOME": "/other/hermes",
+            "CLAUDE_CONFIG_DIR": "/other/claude"
+        ])
+        #expect(custom.first { $0.id == "dsh" }?.directory == "/home/test/custom/dsh/skills")
+        #expect(custom.first { $0.id == "dsh" }?.discoveryDirectories == ["/other/shared/skills"])
+        #expect(custom.first { $0.id == "hermes" }?.directory == "/other/hermes/skills")
+        #expect(custom.first { $0.id == "codex" }?.sharedReaders.contains("dsh") == false)
+        #expect(custom.first { $0.id == "claude" }?.sharedReaders.contains("cursor") == false)
+    }
+
     @Test func customHomesAreSharedByConfigurationRulesAndTranscripts() throws {
         let home = "/test/home"
         let environment = ["CODEX_HOME": "~/work/codex", "PI_CODING_AGENT_DIR": "/custom/pi"]

@@ -13,7 +13,8 @@ import Testing
         let tree = try TempTree()
         let url = URL(fileURLWithPath: tree.path("library.json"))
         let catalog = SessionCatalog(url: url)
-        let source = session("a")
+        var source = session("a")
+        source.client = SessionClient(name: "Warp", bundlePath: "/Applications/Warp.app")
         _ = try await catalog.ingest([source, session("proc-200"), session("b", agent: .gemini)])
         let category = try #require(try await catalog.createCategory(named: "Work").categories.first)
         let annotation = SessionAnnotation(title: "Review API", categoryID: category.id, needsAttention: true,
@@ -29,9 +30,10 @@ import Testing
         #expect(record.lastActivityAt == newer.lastActivityAt)
         #expect(record.session.pid == nil)
         #expect(!record.session.isProcessAlive)
+        #expect(record.session.client == nil)
         #expect(reopened.lastChange?.id == updated.lastChange?.id)
         let text = try String(contentsOf: url, encoding: .utf8)
-        #expect(!text.contains("pid"))
+        #expect(!text.contains("pid") && !text.contains("Warp.app"))
         #expect((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int) == 0o600)
     }
 

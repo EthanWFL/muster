@@ -15,13 +15,25 @@ public struct AgentProcessScanner: Sendable {
     public func scan() -> [Session] {
         guard let result = try? runner.run(["ps", "-axww", "-o", "pid=,command="], cwd: nil),
               result.status == 0 else { return [] }
+        var records: [Int32: ProcessRecord] = [:]
+        var unavailable = Set<Int32>()
+        func record(_ pid: Int32) -> ProcessRecord? {
+            if let cached = records[pid] { return cached }
+            guard !unavailable.contains(pid), let found = table.record(for: pid) else {
+                unavailable.insert(pid)
+                return nil
+            }
+            records[pid] = found
+            return found
+        }
         return ProcessScanner.parsePS(result.stdout).compactMap { pid, command in
             guard let kind = Self.kind(forArgs: command.split(separator: " ").map(String.init)),
-                  let record = table.record(for: pid), let cwd = record.cwd else { return nil }
-            let started = record.startTime ?? Date()
+                  let process = record(pid), let cwd = process.cwd else { return nil }
+            let started = process.startTime ?? Date()
             return Session(
-                id: "proc-\(pid)-\(Int(started.timeIntervalSince1970))", agent: kind, cwd: cwd, pid: pid, pidStartTime: record.startTime,
-                startedAt: started, lastActivityAt: started, state: .unknown)
+                id: "proc-\(pid)-\(Int(started.timeIntervalSince1970))", agent: kind, cwd: cwd, pid: pid, pidStartTime: process.startTime,
+                startedAt: started, lastActivityAt: started, state: .unknown,
+                client: SessionClient.detect(for: process, record: record))
         }
     }
 

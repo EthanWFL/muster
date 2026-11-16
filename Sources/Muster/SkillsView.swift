@@ -4,19 +4,31 @@ import SwiftUI
 struct SkillsView: View {
     @ObservedObject var model: SkillsModel
     let agentID: String
+    let managedAgents: [AgentDescriptor]
     @State private var showsCreate = false
     @State private var showsNewFile = false
     @State private var newFilePath = ""
     @State private var renameText = ""
+    @State private var showsDetail = false
+    @State private var editing = false
+    @State private var selectedFile = "SKILL.md"
+    @State private var pendingDetailID: UUID?
+    @State private var confirmsClose = false
+    @State private var closeAfterSave = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Hairline()
-            HSplitView {
-                skillList.frame(minWidth: 200, idealWidth: 250, maxWidth: 330, maxHeight: .infinity)
-                detail.frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+            if model.deploymentTargets.isEmpty {
+                Label(scopeExplanation, systemImage: "info.circle")
+                    .font(T.small).foregroundStyle(T.muted).padding(T.s3)
+            }
+            SkillsBrowser(model: model, agentID: agentID, managedAgents: managedAgents, open: openDetail, row: skillRow)
+            if model.isBatch, let skill = model.selected {
+                Hairline()
+                batchDeployment(skill).padding(T.s3).background(T.card2).disabled(model.isBusy)
             }
             if model.isBusy { busyBar }
             if let message = model.errorMessage ?? model.notice {
@@ -28,19 +40,49 @@ struct SkillsView: View {
         .foregroundStyle(T.fg)
         .onAppear { if model.searchFocusRequest > 0 { searchFocused = true } }
         .onChange(of: model.searchFocusRequest) { _, _ in searchFocused = true }
+        .onChange(of: model.isBusy) { _, busy in
+            if !busy { presentPendingDetail() }
+        }
+        .sheet(item: $model.deploymentConflict, onDismiss: { model.finishConflictPresentation() }) { inspection in
+            SkillDeploymentConflictSheet(model: model, inspection: inspection)
+        }
+        .sheet(isPresented: $showsDetail) { detailSheet }
         .sheet(isPresented: $model.showsImport, onDismiss: { model.cancel(); model.clearImport() }) { SkillImportSheet(model: model) }
-        .sheet(isPresented: $showsCreate) { SkillCreateSheet(model: model) }
+        .sheet(isPresented: $showsCreate, onDismiss: presentPendingDetail) {
+            SkillCreateSheet(model: model) { pendingDetailID = model.selectedID; editing = true }
+        }
         .sheet(isPresented: Binding(get: { model.showsPlan && model.plan != nil }, set: { if !$0 { model.dismissPlan() } })) {
             if let plan = model.plan { SkillPlanSheet(model: model, plan: plan) }
         }
-        .sheet(item: $model.updateCandidate, onDismiss: { model.dismissUpdate() }) { candidate in SkillUpdateSheet(model: model, candidate: candidate) }
         .alert(L10n.t("Keep this skill draft?"), isPresented: $model.confirmsSelection) {
             Button(L10n.t("Save draft and switch")) { model.resolveSelection(save: true) }
             Button(L10n.t("Discard and switch"), role: .destructive) { model.resolveSelection(save: false) }
-            Button(L10n.t("Cancel"), role: .cancel) { }
+            Button(L10n.t("Cancel"), role: .cancel) { pendingDetailID = nil }
         } message: { Text(L10n.t("The editor has pending changes. Unapplied Agent selections will be discarded when switching.")) }
+    }
+
+    private var detailSheet: some View {
+        detail
+        .frame(minWidth: 640, idealWidth: 800, minHeight: 480, idealHeight: 640)
+        .background(T.bg)
+        .interactiveDismissDisabled(model.unsaved || model.isBusy)
+        .sheet(item: $model.updateCandidate, onDismiss: { model.dismissUpdate() }) { candidate in SkillUpdateSheet(model: model, candidate: candidate) }
+        .onChange(of: model.isBusy) { _, busy in
+            if !busy, closeAfterSave {
+                closeAfterSave = false
+                if !model.unsaved && model.errorMessage == nil { showsDetail = false }
+            }
+        }
+        .alert(L10n.t("Save this draft before closing?"), isPresented: $confirmsClose) {
+            Button(L10n.t("Save draft")) { closeAfterSave = true; model.saveDraft() }
+            Button(L10n.t("Discard"), role: .destructive) { closeAfterSave = true; model.discardDraft() }
+            Button(L10n.t("Cancel"), role: .cancel) {}
+        }
         .alert(L10n.t("Remove this skill?"), isPresented: $model.confirmsRemove) {
-            Button(L10n.t("Remove"), role: .destructive) { model.removeSelected() }
+            Button(L10n.t("Remove"), role: .destructive) {
+                model.removeSelected()
+                Task { @MainActor in await model.operationTask?.value; if model.errorMessage == nil { showsDetail = false } }
+            }
             Button(L10n.t("Cancel"), role: .cancel) { }
         } message: { Text(L10n.t("Its library versions and drafts are deleted. Agent folders are not touched because only undeployed skills can be removed.")) }
         .alert(L10n.t("Rename this skill?"), isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } })) {
@@ -64,10 +106,14 @@ struct SkillsView: View {
             }.padding(.horizontal, T.s2).frame(height: T.controlHeight + 4)
                 .background(RoundedRectangle(cornerRadius: T.r).fill(T.card))
             Button(L10n.t("Import skills")) { model.clearImport(); model.showsImport = true }.buttonStyle(PillButtonStyle(kind: .secondary))
+                .disabled(model.isSelecting)
             Button(L10n.t("New skill")) { showsCreate = true }.buttonStyle(PillButtonStyle(kind: .secondary))
-                .disabled(model.unsaved || model.deploymentDirty || model.isBusy)
-            IconButton(symbol: "folder", label: L10n.t("Open skill library")) { model.openLibrary() }
-            IconButton(symbol: "arrow.uturn.backward", label: L10n.t("Restore last deployment")) { model.previewUndo() }.disabled(!model.snapshot.canUndo || model.isBusy)
+                .disabled(model.unsaved || model.deploymentDirty || model.isBusy || model.isSelecting)
+            Menu {
+                Button(L10n.t("Open skill library")) { model.openLibrary() }
+                Button(L10n.t("Restore last deployment")) { model.previewUndo() }.disabled(!model.snapshot.canUndo)
+            } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(L10n.t("More actions"))
             IconButton(symbol: "arrow.clockwise", label: L10n.t("Refresh skills"), isBusy: model.isBusy) { model.load(force: true) }
         }.padding(T.s3).disabled(model.isBusy)
     }
@@ -82,133 +128,119 @@ struct SkillsView: View {
             .background(T.card2)
     }
 
-    private var skillList: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: T.s2) {
-                    HStack(spacing: T.s2) {
-                        Text(L10n.t("In library") + " · \(model.snapshot.skills.count)").font(T.section).foregroundStyle(T.muted)
-                        Spacer()
-                        if model.snapshot.skills.count > 1 {
-                            Button(model.markedIDs.count > 1 ? L10n.t("Clear selection") : L10n.t("Select all")) {
-                                model.markedIDs.count > 1 ? model.clearMarks() : model.markAll()
-                            }.buttonStyle(PillButtonStyle(kind: .quiet))
-                        }
-                    }.padding(.horizontal, T.s2)
-                    if model.visibleSkills.isEmpty {
-                        Text(L10n.t(model.search.isEmpty ? "Import a skill folder or create your first skill." : "No matching skills."))
-                            .font(T.small).foregroundStyle(T.muted).padding(T.s2)
-                    }
-                    ForEach(model.visibleSkills) { skill in
-                        skillRow(skill)
-                    }
-                    Hairline().padding(.vertical, T.s2)
-                    Text(L10n.t("Agent skills outside Muster")).font(T.section).foregroundStyle(T.muted).padding(.horizontal, T.s2)
-                    if model.discovered.isEmpty && !model.isBusy && !model.deploymentTargets.isEmpty {
-                        Text(L10n.t("Every skill in the Agent folders is managed by Muster, or those folders are empty."))
-                            .font(T.small).foregroundStyle(T.muted).padding(T.s2).fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(model.discovered.filter { !$0.managed && (agentID == "all" || $0.readers.contains(agentID)) &&
-                        (model.search.isEmpty || ($0.name + " " + $0.summary).localizedStandardContains(model.search)) }) { found in
-                        VStack(alignment: .leading, spacing: T.s1) {
-                            Text(found.name).font(T.body)
-                            Text(found.readers.map { AgentRegistry.agent($0)?.name ?? $0 }.joined(separator: " · ")).font(T.micro).foregroundStyle(T.muted)
-                            if found.isShared { Text(L10n.t("Visible through a shared directory")).font(T.micro).foregroundStyle(T.amber) }
-                            if let issue = found.issue { Text(L10n.t(issue)).font(T.micro).foregroundStyle(T.amber).lineLimit(2) }
-                            HStack {
-                                Button(L10n.t("Import")) { model.findLocal(URL(fileURLWithPath: found.path)) }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.isBusy)
-                                IconButton(symbol: "folder", label: L10n.t("Reveal in Finder")) { model.reveal(found.path) }
-                            }
-                        }.padding(T.s2).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }.padding(T.s3)
-            }
-            if model.batchDirty || model.deploymentDirty {
-                Hairline()
-                Button { model.preview() } label: {
-                    Text(L10n.t(model.pendingItems > 1 ? "Review %d skill changes" : "Review 1 skill change", model.pendingItems))
-                        .frame(maxWidth: .infinity)
-                }.buttonStyle(PillButtonStyle(kind: .primary)).padding(T.s2).disabled(model.isBusy)
-            }
-        }
+    private func openDetail(_ skill: SkillRecord) {
+        guard !model.isSelecting, !model.isBusy else { return }
+        editing = false
+        selectedFile = "SKILL.md"
+        pendingDetailID = skill.id
+        model.select(skill.id)
+        presentPendingDetail()
+    }
+
+    private func presentPendingDetail() {
+        guard !showsCreate, !model.isBusy, !model.confirmsSelection,
+              let id = pendingDetailID, model.selectedID == id else { return }
+        pendingDetailID = nil
+        showsDetail = true
+    }
+
+    private func closeDetail() {
+        if model.unsaved { confirmsClose = true } else { showsDetail = false }
     }
 
     private func skillRow(_ skill: SkillRecord) -> some View {
         let marked = model.markedIDs.contains(skill.id)
         let deployments = model.snapshot.deployments.filter { $0.skillID == skill.id }
         let outsideScope = deployments.filter { model.availableAgentIDs?.contains($0.targetID) == false }
-        return Button { model.select(skill.id) } label: {
-            HStack(alignment: .top, spacing: T.s2) {
-                Button {
-                    model.mark(skill.id)
-                } label: {
-                    Image(systemName: marked ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 12)).foregroundStyle(marked ? T.accent : T.faint)
-                        .frame(width: 16, height: 16).contentShape(Rectangle())
-                }
-                .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.88))
-                .help(L10n.t(marked ? "Remove from the batch" : "Add to the batch"))
-                .opacity(model.markedIDs.count > 1 || marked || model.isBatch ? 1 : 0.35)
-                VStack(alignment: .leading, spacing: T.s1) {
-                    HStack(spacing: T.s2) {
-                        Text(skill.name).font(T.body.weight(.medium)).lineLimit(1)
-                        if deployments.contains(where: { $0.revision != skill.revision }) {
-                            Text(L10n.t("Needs update")).font(T.micro).foregroundStyle(T.amber)
-                        }
-                    }
-                    Text(skill.summary).font(T.small).foregroundStyle(T.muted).lineLimit(2)
-                    if !outsideScope.isEmpty {
-                        Text(outsideScope.map {
-                            let name = AgentRegistry.agent($0.targetID)?.name ?? $0.targetID
-                            return L10n.t("%@ (outside current scope)", name)
-                        }.joined(separator: " · ")).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
-                    }
-                }.padding(.bottom, model.deploymentTargets.isEmpty ? 0 : 28)
-            }.padding(T.s2).frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: T.r).fill(model.selectedID == skill.id ? T.accentSoft : .clear))
-                .contentShape(Rectangle())
-        }.buttonStyle(InteractivePlainButtonStyle(pressedScale: 1)).disabled(model.isBusy)
-            .overlay(alignment: .bottomTrailing) {
-                if !model.deploymentTargets.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(model.deploymentTargets) { target in
-                            agentToggle(skill, target: target,
-                                deployment: deployments.first { $0.targetID == target.id })
-                        }
-                    }.padding(.trailing, T.s2).padding(.bottom, T.s2)
-                }
+        return HStack(spacing: T.s3) {
+            if model.isSelecting {
+                Button { model.mark(skill.id) } label: {
+                    Image(systemName: marked ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 15)).foregroundStyle(marked ? T.accent : T.muted)
+                        .frame(width: 24, height: 30).contentShape(Rectangle())
+                }.buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.88))
+                    .accessibilityLabel(L10n.t(marked ? "Remove from the batch" : "Add to the batch") + " · " + skill.name)
             }
-            .accessibilityAddTraits(model.selectedID == skill.id ? .isSelected : [])
+            Button { model.isSelecting ? model.mark(skill.id) : openDetail(skill) } label: {
+                HStack(spacing: T.s3) {
+                    Image(systemName: "doc.text").foregroundStyle(T.muted)
+                    VStack(alignment: .leading, spacing: T.s1) {
+                        HStack(spacing: T.s2) {
+                            Text(skill.name).font(T.body.weight(.medium)).lineLimit(1)
+                            if deployments.contains(where: { $0.revision != skill.revision }) {
+                                Text(L10n.t("Needs update")).font(T.micro).foregroundStyle(T.amber)
+                            }
+                        }
+                        Text(skill.summary).font(T.small).foregroundStyle(T.muted).lineLimit(1)
+                        if !outsideScope.isEmpty {
+                            Text(outsideScope.map {
+                                L10n.t("%@ (outside current scope)", AgentRegistry.agent($0.targetID)?.name ?? $0.targetID)
+                            }.joined(separator: " · ")).font(T.micro).foregroundStyle(T.muted).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(InteractivePlainButtonStyle(pressedScale: 1))
+            HStack(spacing: T.s1) {
+                ForEach(managedAgents) { agent in
+                    agentToggle(skill, agent: agent, target: model.deploymentTargets.first { $0.id == agent.id },
+                                deployment: deployments.first { $0.targetID == agent.id })
+                }
+            }.disabled(model.isSelecting)
+            if !model.isSelecting {
+                Button { openDetail(skill) } label: {
+                    Image(systemName: "chevron.right").font(T.glyph).frame(width: 24, height: 30)
+                }.buttonStyle(InteractivePlainButtonStyle()).accessibilityLabel(L10n.t("View skill"))
+            }
+        }.padding(T.s3).background(model.isSelecting && marked ? T.accentSoft : .clear)
+            .disabled(model.isBusy)
     }
 
-    /// A compact per-Agent switch; the deployment still goes through the library plan.
-    private func agentToggle(_ skill: SkillRecord, target: SkillTarget, deployment: SkillDeployment?) -> some View {
-        let deployed = deployment != nil
-        let label = L10n.t(deployed ? "Disable in %@" : "Enable in %@", target.name)
-        let directory = (target.directory as NSString).abbreviatingWithTildeInPath
-        return Button { model.toggleDeployment(skill, target: target) } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(T.card2)
-                AgentLogo(agentID: target.id,
-                          mark: target.id == "pi" ? "π" : String(target.name.prefix(1)), size: 17)
-                    .saturation(deployed ? 1 : 0)
-                    .opacity(deployed ? 1 : 0.45)
-            }
-            .frame(width: 26, height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(T.line, lineWidth: 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    /// Managed Agents stay visible even when deployment is not supported on this Mac.
+    private func agentToggle(_ skill: SkillRecord, agent: AgentDescriptor, target: SkillTarget?, deployment: SkillDeployment?) -> some View {
+        let inspection = deployment.flatMap { model.snapshot.deploymentInspections[$0.id] }
+        let deployed = inspection?.status == .active
+        let label = L10n.t(deployed ? "Disable in %@" : "Enable in %@", agent.name)
+        let shared = model.discovered.contains { $0.name == skill.name && $0.isShared && $0.readers.contains(agent.id) }
+        let sharedNote = shared || !(target?.sharedReaders.isEmpty ?? true)
+            ? " · " + L10n.t("Shared visibility is independent of this deployment switch.") : ""
+        let hint: String
+        if let inspection, inspection.status != .active {
+            hint = agent.name + " · " + L10n.t(inspection.status == .missing
+                ? "Deployment is missing. Click to clear its record or redeploy."
+                : "Deployment changed outside Muster. Click to resolve ownership.")
+        } else if let target {
+            hint = label + " · " + (target.directory as NSString).abbreviatingWithTildeInPath + sharedNote
+        } else {
+            hint = agent.name + " · " + L10n.t(agent.skills == nil
+                ? "Skill deployment is not supported for this Agent yet."
+                : "This Agent is selected in Settings but was not detected on this Mac.")
+        }
+        return Button {
+            if let target { model.toggleDeployment(skill, target: target) }
+        } label: {
+            AgentLogo(agentID: agent.id, mark: agent.id == "pi" ? "π" : String(agent.name.prefix(1)), size: 19)
+                .saturation(deployed ? 1 : 0)
+                .opacity(deployed ? 1 : 0.35)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(T.card2))
+                .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.88))
-        .help("\(label) · \(directory)")
-        .accessibilityLabel(label)
+        .disabled(target == nil)
+        .help(hint)
+        .accessibilityLabel(agent.name)
+        .accessibilityValue(L10n.t(deployed ? "Enabled" : "Disabled"))
         .contextMenu {
-            Button(label) { model.toggleDeployment(skill, target: target) }
-            if let deployment {
-                Divider()
-                Button(L10n.t("Use symbolic link")) { model.setDeploymentMode(skill, target: target, .symlink) }
-                    .disabled(deployment.mode == .symlink)
-                Button(L10n.t("Use a copy")) { model.setDeploymentMode(skill, target: target, .copy) }
-                    .disabled(deployment.mode == .copy)
+            if let target {
+                Button(label) { model.toggleDeployment(skill, target: target) }
+                if let deployment, deployed {
+                    Divider()
+                    Button(L10n.t("Use symbolic link")) { model.setDeploymentMode(skill, target: target, .symlink) }
+                        .disabled(deployment.mode == .symlink)
+                    Button(L10n.t("Use a copy")) { model.setDeploymentMode(skill, target: target, .copy) }
+                        .disabled(deployment.mode == .copy)
+                }
             }
         }
     }
@@ -221,7 +253,7 @@ struct SkillsView: View {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: T.s2) {
                                 Text(skill.name).font(.system(size: 21, weight: .semibold)).textSelection(.enabled)
-                                Text(skill.summary).font(T.body).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
+                                Text(skill.summary).font(T.body).foregroundStyle(T.muted).lineLimit(2)
                             }
                             Spacer(minLength: 0)
                             Menu {
@@ -229,6 +261,7 @@ struct SkillsView: View {
                                     .disabled(model.dirty || model.unsaved || model.isBusy)
                                 Button(L10n.t("Remove from library")) { model.confirmsRemove = true }
                                     .disabled(!model.canRemove)
+                                    .help(L10n.t("Disable every deployment before removing this skill."))
                                 Divider()
                                 Button(L10n.t("Check skill update")) { model.checkUpdate() }.disabled(model.dirty || model.isBusy || model.updateBlockedReason != nil)
                                 if skill.revisions.count > 1 {
@@ -240,27 +273,28 @@ struct SkillsView: View {
                             } label: { CompactMenuLabel(title: L10n.t("Versions"), symbol: "clock.arrow.circlepath") }
                             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(model.isBusy)
                         }
-                        if !model.canRemove {
-                            Label(L10n.t("Disable every deployment before removing this skill."), systemImage: "info.circle")
-                                .font(T.micro).foregroundStyle(T.muted)
-                        }
                         if let reason = model.updateBlockedReason, skill.source.kind != .created {
                             Label(L10n.t(reason), systemImage: "exclamationmark.triangle")
                                 .font(T.micro).foregroundStyle(T.amber).fixedSize(horizontal: false, vertical: true)
                         }
-                        source(skill)
+                        DisclosureGroup(L10n.t("Source and version")) { source(skill).padding(.top, T.s2) }
+                            .font(T.small).foregroundStyle(T.muted)
                         if model.deploymentTargets.isEmpty {
                             Label(scopeExplanation, systemImage: "info.circle")
                                 .font(T.micro).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
                         }
-                        if model.isBatch { batchDeployment(skill) }
-                        editorSection
+                        if editing { editorSection } else { readerSection }
                     }.padding(T.s4)
+                }
+                if model.isBusy { busyBar }
+                if let message = model.errorMessage ?? model.notice {
+                    Text(message).font(T.small).foregroundStyle(model.errorMessage == nil ? T.muted : T.red)
+                        .padding(.horizontal, T.s3).fixedSize(horizontal: false, vertical: true)
                 }
                 Hairline()
                 ViewThatFits(in: .horizontal) {
-                    HStack { draftStatus; Spacer(); editorActions }
-                    VStack(alignment: .leading, spacing: T.s2) { draftStatus; HStack { Spacer(); editorActions } }
+                    HStack { draftStatus; Spacer(); detailActions }
+                    VStack(alignment: .leading, spacing: T.s2) { draftStatus; HStack { Spacer(); detailActions } }
                 }.padding(T.s3)
             }
         } else {
@@ -271,6 +305,42 @@ struct SkillsView: View {
                     .font(T.small).foregroundStyle(T.muted).multilineTextAlignment(.center)
             }.padding(T.s4).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var readerSection: some View {
+        VStack(alignment: .leading, spacing: T.s3) {
+            Picker(L10n.t("File"), selection: $selectedFile) {
+                Text("SKILL.md").tag("SKILL.md")
+                ForEach(model.files.filter { $0 != "SKILL.md" && !model.removedFiles.contains($0) }, id: \.self) { path in
+                    Text(path).tag(path)
+                }
+            }.labelsHidden().frame(maxWidth: 360, alignment: .leading)
+            if selectedFile == "SKILL.md" {
+                SkillReadView(text: model.draft, markdown: true, stripMetadata: true)
+            } else if let text = model.currentFiles[selectedFile] {
+                SkillReadView(text: text, markdown: selectedFile.lowercased().hasSuffix(".md"))
+            } else {
+                Text(L10n.t("Binary or oversized file. Reveal it in Finder to edit it outside Muster."))
+                    .font(T.small).foregroundStyle(T.muted)
+                if let directory = model.selectedDirectory {
+                    Button(L10n.t("Reveal in Finder")) { model.reveal(directory) }
+                        .buttonStyle(PillButtonStyle(kind: .secondary))
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var detailActions: some View {
+        HStack(spacing: T.s2) {
+            if editing {
+                editorActions
+                Button(L10n.t("Read")) { editing = false }.buttonStyle(PillButtonStyle(kind: .secondary))
+            } else {
+                Button(L10n.t("Edit")) { editing = true }.buttonStyle(PillButtonStyle(kind: .secondary))
+            }
+            Button(L10n.t("Close"), action: closeDetail)
+                .buttonStyle(PillButtonStyle(kind: .secondary)).keyboardShortcut(.cancelAction)
+        }.disabled(model.isBusy)
     }
 
     private var editorSection: some View {
@@ -337,7 +407,7 @@ struct SkillsView: View {
     }
 
     private var draftStatus: some View {
-        Text(L10n.t(model.unsaved ? "Unsaved changes" : (model.dirty ? "Draft saved" : "Published version")))
+        Text(L10n.t(model.unsaved ? "Unsaved changes" : (model.dirty ? "Draft saved, not published" : "Matches the published version")))
             .font(T.small).foregroundStyle(T.muted)
     }
     private var editorActions: some View {
@@ -388,7 +458,8 @@ struct SkillsView: View {
         let missing = agentID != "all" ? out.filter { $0.id == agentID } : out
         let names = (missing.isEmpty ? out : missing).map(\.name).joined(separator: L10n.t(", "))
         if agentID != "all", enabled.contains(agentID) { return "" }
-        return L10n.t("Claude Code, Codex and Pi are supported, but none of them are both installed and enabled right now. Enable %@ in Settings → Agent management, or install the Agent.", names)
+        let supported = model.targets.map(\.name).joined(separator: L10n.t(", "))
+        return L10n.t("Supported Agents: %@. Enable %@ in Settings → Agent management, or install the Agent.", supported, names)
     }
 
     private func targetRow(_ target: SkillTarget, skill: SkillRecord) -> some View {
@@ -481,6 +552,7 @@ private struct SkillImportSheet: View {
 
 private struct SkillCreateSheet: View {
     @ObservedObject var model: SkillsModel
+    var onCreated: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var summary = ""
@@ -495,7 +567,7 @@ private struct SkillCreateSheet: View {
                 Button(L10n.t("Cancel")) { dismiss() }.buttonStyle(PillButtonStyle(kind: .secondary)).keyboardShortcut(.cancelAction)
                 Button(L10n.t("Create")) {
                     model.create(name: name, description: summary)
-                    Task { @MainActor in await model.operationTask?.value; if model.errorMessage == nil { dismiss() } }
+                    Task { @MainActor in await model.operationTask?.value; if model.errorMessage == nil { onCreated(); dismiss() } }
                 }.buttonStyle(PillButtonStyle(kind: .primary)).disabled(name.isEmpty || summary.isEmpty || model.isBusy)
             }
         }.padding(T.s4).frame(width: 440).interactiveDismissDisabled(model.isBusy)

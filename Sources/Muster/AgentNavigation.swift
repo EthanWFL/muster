@@ -3,6 +3,13 @@ import Foundation
 enum AgentSection: String, CaseIterable, Identifiable {
     case rules, skills, configuration
     var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .rules: return "text.alignleft"
+        case .skills: return "sparkles"
+        case .configuration: return "slider.horizontal.3"
+        }
+    }
     var title: String {
         switch self {
         case .rules: return L10n.t("Rules")

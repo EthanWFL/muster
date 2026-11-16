@@ -2,14 +2,14 @@
 
 Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent 的会话、共享规则、技能和模型配置。经常同时使用 Claude Code、Codex、Pi 等工具时，可以在一个面板里找到正在进行的工作、继续旧会话，或修改常用设置。
 
-[下载 1.1.3](https://github.com/EthanWFL/muster/releases/download/1.1.3/Muster-1.1.3.dmg) · [更新记录](docs/releases/1.1.3.md) · [全部版本](https://github.com/EthanWFL/muster/releases) · [详细使用说明](docs/usage.md)
+[下载最新版](https://github.com/EthanWFL/muster/releases/latest) · [1.2.0 更新记录](docs/releases/1.2.0.md) · [全部版本](https://github.com/EthanWFL/muster/releases) · [详细使用说明](docs/usage.md)
 
 ## 能做什么
 
 | 功能 | 用途 |
 | --- | --- |
 | 项目工作台 | 添加或固定项目，集中查看相关会话、待处理事项和产物目录 |
-| 会话库 | 查找本机运行及历史会话，记录标题、分类和备注，在终端继续工作 |
+| 会话库 | 查找本机运行及历史会话，记录标题、分类和备注，通过来源 Logo 切回当前客户端 |
 | Agent 工作区 | 统一管理共享规则、独立技能库和已有的模型配置能力 |
 | 快捷面板 | 直接编辑规则或配置；常用的预览、应用和保存按钮保持可见 |
 | 清理 | 预览端口、孤儿进程及失效 worktree 的清理计划，确认后执行 |
@@ -21,11 +21,11 @@ Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent
 
 当前安装包支持 **macOS 14 及以上、Apple Silicon（arm64）**，运行时不需要安装 Swift 或开发工具。
 
-1. 下载 [Muster-1.1.3.dmg](https://github.com/EthanWFL/muster/releases/download/1.1.3/Muster-1.1.3.dmg)，将 `Muster.app` 拖入 `/Applications`。
+1. 在[最新发布页](https://github.com/EthanWFL/muster/releases/latest)下载 DMG，将 `Muster.app` 拖入 `/Applications`。
 2. 启动后点击菜单栏的蝠鲼图标，或按 `⌃⌥A` 打开快捷面板。应用不显示 Dock 图标。
 3. 在“设置 → Agent 管理”选择希望 Muster 处理的 Agent，再从项目、会话或 Agent 页开始使用。
 
-安装包目前采用 ad-hoc 代码签名，尚未经过 Apple 公证。首次打开如被 macOS 阻止，可在“系统设置 → 隐私与安全性”中允许打开。发布页同时提供 [SHA-256 校验文件](https://github.com/EthanWFL/muster/releases/download/1.1.3/Muster-1.1.3.sha256)。
+安装包目前采用 ad-hoc 代码签名，尚未经过 Apple 公证。首次打开如被 macOS 阻止，可在“系统设置 → 隐私与安全性”中允许打开。发布页同时提供 SHA-256 校验文件。
 
 ### 更新
 

@@ -71,6 +71,13 @@ import MusterCore
         await skills.operationTask?.value
         workspace.selectAgent("pi")
         config.model = "unsaved"
+        workspace.selectSection(.rules)
+        workspace.selectSection(.skills)
+        await skills.operationTask?.value
+        workspace.selectSection(.configuration)
+        #expect(config.dirty && config.model == "unsaved")
+        #expect(workspace.section == .configuration && workspace.quickSection == .rules)
+        #expect(defaults.string(forKey: "MusterAgentSection") == "configuration")
         workspace.selectAgent("claude")
         #expect(workspace.confirmsAgentChange)
         #expect(workspace.agentID == "pi" && config.model == "unsaved")

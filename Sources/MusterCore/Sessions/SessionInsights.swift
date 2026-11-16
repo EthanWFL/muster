@@ -1,5 +1,18 @@
 import Foundation
 
+public struct SessionActivityCounts: Equatable, Sendable {
+    public let total: Int
+    public let active: Int
+    public let unknown: Int
+
+    public init(sessions: [Session]) {
+        let live = sessions.filter { $0.isProcessAlive && $0.state != .ended }
+        total = live.count
+        active = live.filter { $0.hasTranscript && $0.state == .running }.count
+        unknown = live.filter { !$0.hasTranscript || $0.state == .unknown }.count
+    }
+}
+
 public enum SessionInsights {
     /// 目录当前的 git 分支；分离 HEAD 时返回短 hash，不是 git 目录返回 nil。
     /// worktree 的 `.git` 是个文件，指向真正的 gitdir。

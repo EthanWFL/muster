@@ -179,7 +179,7 @@ struct SessionLibraryView: View {
             } else {
                 List(selection: Binding<String?>(get: { library.selectedID }, set: { if let id = $0 { library.select(id) } })) {
                     ForEach(entries) { entry in
-                        SessionLibraryRow(entry: entry)
+                        SessionLibraryRow(entry: entry, openClient: { model.openClient(entry.session) })
                             .tag(entry.id)
                             .listRowInsets(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
                             .contextMenu {
@@ -193,9 +193,9 @@ struct SessionLibraryView: View {
                                         Button(category.name) { library.assign(entry, to: category.id) }
                                     }
                                 }.disabled(entry.stored == nil || library.isSaving || (library.selectedID == entry.id && library.dirty))
-                                if entry.session.resumeCommand != nil {
+                                if entry.session.isProcessAlive, let client = entry.session.client {
                                     Divider()
-                                    Button(L10n.t("Copy resume command")) { model.copyResume(entry.session) }
+                                    Button(L10n.t("Open %@", client.name)) { model.openClient(entry.session) }
                                 }
                             }
                     }
@@ -218,6 +218,7 @@ struct SessionLibraryView: View {
 
 private struct SessionLibraryRow: View {
     let entry: LibrarySession
+    let openClient: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -227,6 +228,7 @@ private struct SessionLibraryRow: View {
                 if entry.annotation.needsAttention {
                     Image(systemName: "flag.fill").foregroundStyle(T.amber).help(L10n.t("Needs attention"))
                 }
+                SessionClientButton(session: entry.session, action: openClient)
             }
             Text(entry.session.cwd.isEmpty ? L10n.t("Unknown project") : (entry.session.cwd as NSString).abbreviatingWithTildeInPath)
                 .font(T.monoMicro).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -296,19 +298,13 @@ private struct SessionLibraryDetail: View {
 
     private func heading(_ entry: LibrarySession) -> some View {
         VStack(alignment: .leading, spacing: T.s2) {
-            Text(entry.displayTitle).font(.system(size: 19, weight: .semibold)).textSelection(.enabled)
+            HStack(alignment: .top) {
+                Text(entry.displayTitle).font(.system(size: 19, weight: .semibold)).textSelection(.enabled)
+                Spacer(minLength: T.s2)
+                SessionClientButton(session: entry.session) { model.openClient(entry.session) }
+            }
             Text(entry.session.agent.displayName + " · " + L10n.t(entry.session.isProcessAlive ? "Process present" : "No linked running process"))
                 .font(T.small).foregroundStyle(T.muted)
-            HStack {
-                if entry.session.isProcessAlive || entry.session.resumeCommand != nil {
-                    Button { model.continueSession(entry.session) } label: {
-                        Label(L10n.t(entry.session.isProcessAlive ? "Focus terminal" : "Continue in Terminal"), systemImage: "terminal")
-                    }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.resumingSessionKey != nil)
-                }
-                if entry.session.resumeCommand != nil {
-                    IconButton(symbol: "doc.on.doc", label: L10n.t("Copy resume command"), tint: T.ctlFg) { model.copyResume(entry.session) }
-                }
-            }
         }
     }
 

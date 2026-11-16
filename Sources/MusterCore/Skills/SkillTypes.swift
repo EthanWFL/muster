@@ -1,6 +1,8 @@
 import Foundation
 
 public enum SkillError: String, LocalizedError {
+    case localSkillShared = "This skill is visible through a shared or duplicate source. It cannot be disabled for this Agent alone."
+    case localSkillOccupied = "The original skill path is occupied. Its saved entry was kept; move the conflicting entry before restoring."
     case outsideScope = "This deployment includes Agents outside the current scope. Select them in Settings before restoring it."
     case invalidDocument = "A skill needs valid YAML name and description fields in SKILL.md."
     case unsafeName = "Use a skill name containing only letters, numbers, hyphens or underscores (1–64 characters)."
@@ -164,8 +166,8 @@ public struct SkillContent: Sendable {
     }
 }
 
-public struct SkillDiscovery: Identifiable, Sendable {
-    public var id: String { path }
+public struct SkillDiscovery: Identifiable, Sendable, Equatable {
+    public var id: String { suspendedID.map { "suspended:" + $0.uuidString } ?? path }
     public let path: String
     public let name: String
     public let summary: String
@@ -173,6 +175,39 @@ public struct SkillDiscovery: Identifiable, Sendable {
     public let isShared: Bool
     public let managed: Bool
     public let issue: String?
+    public var fingerprint: String? = nil
+    public var digest: String? = nil
+    public var resolvedPath: String? = nil
+    public var suspendedID: UUID? = nil
+
+    public func isSameSkill(as other: SkillDiscovery) -> Bool {
+        name == other.name && digest != nil && digest == other.digest
+    }
+}
+
+public struct SkillSuspension: Codable, Sendable, Identifiable {
+    public let id: UUID
+    public let path: String
+    public let parent: String
+    public let backup: String
+    public let backupParent: String
+    public let fingerprint: String
+    public let targetID: String
+    public let name: String
+    public let summary: String
+    public let digest: String
+    public let resolvedSource: String
+    public let deployment: SkillDeployment?
+    public let restoreBackup: String?
+}
+
+public struct SkillDeploymentInspection: Identifiable, Sendable, Equatable {
+    public enum Status: Sendable { case active, missing, changed, unreadable }
+    public var id: String { deployment.id }
+    public let deployment: SkillDeployment
+    public let fingerprint: String
+    public let resolvedParent: String
+    public let status: Status
 }
 
 public struct SkillLibrarySnapshot: Sendable {
@@ -180,5 +215,7 @@ public struct SkillLibrarySnapshot: Sendable {
     public let skills: [SkillRecord]
     public let deployments: [SkillDeployment]
     public let canUndo: Bool
+    public var deploymentInspections: [String: SkillDeploymentInspection] = [:]
+    public var suspendedSkillIDs: Set<UUID> = []
     public static let empty = Self(revision: 0, skills: [], deployments: [], canUndo: false)
 }

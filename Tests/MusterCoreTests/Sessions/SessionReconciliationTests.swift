@@ -17,6 +17,29 @@ import Testing
                        pidStartTime: start, startedAt: start, state: .unknown)
     }
 
+    @Test func clientFollowsTheCurrentProcessAndClearsOnExitOrAmbiguity() {
+        let store = SessionStore(clock: clock, probe: probe)
+        var live = process(42)
+        live.client = SessionClient(name: "Warp", bundlePath: "/Applications/Warp.app")
+        _ = store.refresh(transcripts: [transcript("a")], processes: [live])
+        #expect(store.session(id: "a")?.client == live.client)
+        // A subsequent disk read must not erase the linked process's client.
+        store.mergeDisk([transcript("a")])
+        #expect(store.session(id: "a")?.client == live.client)
+        // If ancestry can no longer be identified, do not retain an old source label.
+        live.client = nil
+        _ = store.refresh(transcripts: [transcript("a")], processes: [live])
+        #expect(store.session(id: "a")?.client == nil)
+        live.client = SessionClient(name: "VS Code", bundlePath: "/Applications/Visual Studio Code.app")
+        _ = store.refresh(transcripts: [transcript("a")], processes: [live])
+        #expect(store.session(id: "a")?.client == live.client)
+        let ambiguous = store.refresh(transcripts: [transcript("a"), transcript("b")], processes: [live])
+        #expect(ambiguous.filter(\.hasTranscript).allSatisfy { $0.client == nil })
+        #expect(ambiguous.first { !$0.hasTranscript }?.client == live.client)
+        probe.kill(42)
+        #expect(store.sessions().allSatisfy { $0.client == nil })
+    }
+
     @Test func uniqueAssociationPersistsAndTracksExit() {
         let store = SessionStore(clock: clock, probe: probe)
         let disk = transcript("a"), live = process(42)

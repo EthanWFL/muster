@@ -51,13 +51,13 @@ public enum AgentRegistry {
             transcript: path(".claude/projects", "CLAUDE_CONFIG_DIR", "projects"), resumeArguments: ["claude", "--resume"],
             rules: [path(".claude/CLAUDE.md", "CLAUDE_CONFIG_DIR", "CLAUDE.md"), path(".claude/AGENTS.md", "CLAUDE_CONFIG_DIR", "AGENTS.md")],
             configuration: path(".claude/settings.json", "CLAUDE_CONFIG_DIR", "settings.json"), configurationOrder: 2,
-            skills: .init(directory: path(".claude/skills", "CLAUDE_CONFIG_DIR", "skills"))),
+            skills: .init(directory: path(".claude/skills", "CLAUDE_CONFIG_DIR", "skills"), sharedReaders: ["claude", "cursor"])),
         AgentDescriptor(id: "codex", name: "Codex", kind: .codex, executables: ["codex"], nodePackages: ["/@openai/codex/"],
             transcript: path(".codex/sessions", "CODEX_HOME", "sessions"), transcriptDepth: 4, resumeArguments: ["codex", "resume"],
             rules: [path(".codex/AGENTS.override.md", "CODEX_HOME", "AGENTS.override.md"), path(".codex/AGENTS.md", "CODEX_HOME", "AGENTS.md")],
             configuration: path(".codex/config.toml", "CODEX_HOME", "config.toml"), configurationOrder: 0, editableConfiguration: true,
             skills: .init(directory: path(".agents/skills"),
-                          additionalDiscovery: [path(".codex/skills", "CODEX_HOME", "skills")], sharedReaders: ["codex", "pi"]),
+                          additionalDiscovery: [path(".codex/skills", "CODEX_HOME", "skills")], sharedReaders: ["codex", "pi", "dsh", "cursor"]),
             applications: [.init(relativePath: "Codex.app"),
                            .init(relativePath: "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app", bundleIdentifier: "com.openai.codex.cli")]),
         AgentDescriptor(id: "pi", name: "Pi", kind: .pi, executables: ["pi"], nodePackages: ["/pi-coding-agent/"],
@@ -67,14 +67,20 @@ public enum AgentRegistry {
             editableConfiguration: true, jsonConfiguration: true, providerKey: "defaultProvider", modelKey: "defaultModel",
             skills: .init(directory: path(".pi/agent/skills", "PI_CODING_AGENT_DIR", "skills"), additionalDiscovery: [path(".agents/skills")])),
         AgentDescriptor(id: "dsh", name: "DeepSeek Harness", kind: .dsh, executables: ["dsh"],
-            rules: [path(".dsh/AGENTS.md", "DSH_HOME", "AGENTS.md")]),
+            rules: [path(".dsh/AGENTS.md", "DSH_HOME", "AGENTS.md")],
+            skills: .init(directory: path(".dsh/skills", "DSH_HOME", "skills"),
+                          additionalDiscovery: [path(".agents/skills", "DSH_AGENTS_HOME", "skills")]),
+            applications: [.init(relativePath: "DeepSeek Harness.app")]),
         AgentDescriptor(id: "gemini", name: "Gemini CLI", kind: .gemini, executables: ["gemini"], nodePackages: ["/gemini-cli/"],
             rules: [path(".gemini/GEMINI.md")]),
         AgentDescriptor(id: "cursor", name: "Cursor", kind: .cursor, executables: ["cursor-agent"],
             rules: [path(".cursorrules")], configuration: path("Library/Application Support/Cursor/User/settings.json"), configurationOrder: 4,
+            skills: .init(directory: path(".cursor/skills"),
+                          additionalDiscovery: [path(".agents/skills"), path(".claude/skills"), path(".codex/skills")]),
             applications: [.init(relativePath: "Cursor.app")]),
         AgentDescriptor(id: "opencode", name: "OpenCode", kind: .opencode, executables: ["opencode"]),
         AgentDescriptor(id: "hermes", name: "Hermes", configuration: path(".hermes/config.yaml", "HERMES_HOME", "config.yaml"), configurationOrder: 3,
+            skills: .init(directory: path(".hermes/skills", "HERMES_HOME", "skills")),
             installationExecutables: ["hermes"]),
         AgentDescriptor(id: "warp", name: "Warp", configuration: path(".warp/settings.toml"), configurationOrder: 5,
             applications: [.init(relativePath: "Warp.app", bundleIdentifier: "dev.warp.Warp-Stable")]),
@@ -87,9 +93,15 @@ public enum AgentRegistry {
     public static func skillTargets(home: String = NSHomeDirectory(), environment: [String: String] = ProcessInfo.processInfo.environment) -> [SkillTarget] {
         all.compactMap { agent in
             guard let capability = agent.skills else { return nil }
-            return SkillTarget(id: agent.id, name: agent.name, directory: capability.directory.resolve(home: home, environment: environment),
+            let directory = capability.directory.resolve(home: home, environment: environment)
+            let readers = capability.sharedReaders.filter { id in
+                id == agent.id || all.first(where: { $0.id == id })?.skills?.additionalDiscovery.contains {
+                    $0.resolve(home: home, environment: environment) == directory
+                } == true
+            }
+            return SkillTarget(id: agent.id, name: agent.name, directory: directory,
                 discoveryDirectories: capability.additionalDiscovery.map { $0.resolve(home: home, environment: environment) },
-                sharedReaders: capability.sharedReaders)
+                sharedReaders: readers)
         }
     }
 

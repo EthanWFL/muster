@@ -185,6 +185,18 @@ final class PanelModel: ObservableObject {
         env.stop()
     }
 
+    /// Activate the already-running client only; never start a terminal or copy a resume command.
+    func openClient(_ session: Session, activate: (SessionClient) -> Bool = { client in
+        let path = URL(fileURLWithPath: client.bundlePath).resolvingSymlinksInPath()
+        guard let app = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleURL?.resolvingSymlinksInPath() == path
+        }) else { return false }
+        return app.activate(options: [])
+    }) {
+        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, let client = session.client else { return }
+        notice = activate(client) ? nil : L10n.t("Could not activate %@. The client may have closed.", client.name)
+    }
+
     func jumpToTerminal(_ session: Session) {
         guard agentSelection.manages(session.agent.rawValue) else { return }
         let jumper = terminalJumper
