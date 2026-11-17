@@ -34,7 +34,7 @@ final class SkillsModel: ObservableObject {
     @Published private(set) var publishedText = ""
     @Published private(set) var savedDraftText = ""
     @Published private(set) var files: [String] = []
-    /// The published revision folder Agents link to, for "Reveal in Finder".
+    /// The stable active source folder, for "Reveal in Finder".
     @Published private(set) var selectedDirectory: String?
     /// Every text file other than `SKILL.md` that the editor can change, keyed by relative path.
     @Published private(set) var fileTexts: [String: String] = [:]
@@ -100,14 +100,16 @@ final class SkillsModel: ObservableObject {
     /// Deployed skills whose library version differs from what the Agent folder holds.
     var staleDeployments: Int {
         snapshot.deployments.filter { deployment in
-            snapshot.skills.first { $0.id == deployment.skillID }?.revision != deployment.revision
+            guard let skill = snapshot.skills.first(where: { $0.id == deployment.skillID }) else { return false }
+            return deployment.sourcePath != skill.sourcePath || deployment.mode != .symlink ||
+                (skill.sourcePath == nil && skill.revision != deployment.revision)
         }.count
     }
     var pendingItems: Int {
         batchDirty ? markedIDs.count : (deploymentDirty ? 1 : 0)
     }
     var isBatch: Bool { isSelecting && !markedIDs.isEmpty }
-    var canPublish: Bool { dirty && baseRevision == selected?.revision && !isBusy }
+    var canPublish: Bool { dirty && baseRevision == selected?.revision && selected?.sourcePath != nil && selected.map { snapshot.sourceIssues[$0.id] == nil } == true && !isBusy }
     var visibleSkills: [SkillRecord] {
         let words = search.split(whereSeparator: \.isWhitespace)
         return snapshot.skills.filter { skill in words.allSatisfy { (skill.name + " " + skill.summary).localizedStandardContains(String($0)) } }
@@ -137,6 +139,14 @@ final class SkillsModel: ObservableObject {
                 message: "Click to undo this Muster deployment. Other readers of its shared directory may also be affected.")
         }
         if enabled {
+            if entries.contains(where: { entry in
+                snapshot.skills.contains { skill in
+                    skill.sourcePath == entry.path ||
+                        (entry.fingerprint?.hasPrefix("tree:") == true && skill.sourcePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == entry.resolvedPath)
+                }
+            }) {
+                return DiscoveryAccess(enabled: true, canToggle: false, message: SkillError.sourceCycle.rawValue)
+            }
             guard entries.count == 1, let entry = entries.first, !entry.isShared, entry.readers == [agentID],
                   !discovered.contains(where: { other in
                       other.suspendedID == nil && other.resolvedPath == entry.resolvedPath &&
@@ -152,9 +162,11 @@ final class SkillsModel: ObservableObject {
 
     private func managedDiscoveryDeployment(_ found: SkillDiscovery, agentID: String) -> SkillDeployment? {
         snapshot.deployments.first { deployment in
-            deployment.targetID == agentID && deployment.revision == found.digest &&
-                snapshot.skills.contains { $0.id == deployment.skillID && $0.name == found.name } &&
-                snapshot.deploymentInspections[deployment.id]?.status == .active
+            deployment.targetID == agentID &&
+                snapshot.skills.contains { skill in
+                    skill.id == deployment.skillID && skill.name == found.name &&
+                        (deployment.sourcePath != nil ? deployment.sourcePath == skill.sourcePath && found.resolvedPath == skill.sourcePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } : deployment.revision == found.digest)
+                } && snapshot.deploymentInspections[deployment.id]?.status == .active
         }
     }
 
@@ -271,7 +283,9 @@ final class SkillsModel: ObservableObject {
     /// A matching source is already imported; a matching name alone may be a different skill.
     func importedSkill(for discovery: SkillDiscovery) -> SkillRecord? {
         guard let digest = discovery.digest else { return nil }
-        return snapshot.skills.first { $0.name == discovery.name && $0.revision == digest }
+        return snapshot.skills.first {
+            $0.name == discovery.name && ($0.sourcePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == discovery.resolvedPath || ($0.sourcePath == nil && $0.revision == digest))
+        }
     }
 
     // MARK: - Editor
@@ -280,12 +294,6 @@ final class SkillsModel: ObservableObject {
         if isBatch {
             if on { batchDesired[target.id] = .symlink } else { batchDesired[target.id] = nil }
         } else if on { desired[target.id] = .symlink } else { desired[target.id] = nil }
-    }
-    func setMode(_ target: SkillTarget, _ mode: SkillInstallMode) {
-        if isBatch { batchDesired[target.id] = mode } else { desired[target.id] = mode }
-    }
-    func mode(_ target: SkillTarget) -> SkillInstallMode {
-        (isBatch ? batchDesired[target.id] : desired[target.id]) ?? .symlink
     }
     func isEnabled(_ target: SkillTarget) -> Bool {
         (isBatch ? batchDesired[target.id] : desired[target.id]) != nil
@@ -308,7 +316,7 @@ final class SkillsModel: ObservableObject {
             self.snapshot = try await self.library.publish(id, expectedRevision: self.baseRevision, text: self.draft,
                 files: self.currentFiles, removed: Array(self.removedFiles))
             try await self.selectNow(id)
-            self.notice = L10n.t("Library version saved. Preview deployment to update your Agents.")
+            self.notice = L10n.t("Source updated. Linked Agents read the new content when reloaded.")
         }
     }
     func openFile(_ path: String) {
@@ -346,7 +354,7 @@ final class SkillsModel: ObservableObject {
         run("Restoring version") {
             self.snapshot = try await self.library.restoreRevision(skill.id, expectedRevision: skill.revision, revision: revision)
             try await self.selectNow(skill.id)
-            self.notice = L10n.t("Library version restored. Preview deployment to update your Agents.")
+            self.notice = L10n.t("Source restored. Linked Agents read the restored content when reloaded.")
         }
     }
 
@@ -355,17 +363,9 @@ final class SkillsModel: ObservableObject {
     /// Inline switches back up existing skills automatically; batch and recovery keep previews.
     func toggleDeployment(_ skill: SkillRecord, target: SkillTarget) {
         guard !isBusy else { return }
+        guard skill.sourcePath != nil else { errorMessage = L10n.t(SkillError.sourceUnavailable.rawValue); return }
         var next = deployments(of: skill)
         if next.removeValue(forKey: target.id) == nil { next[target.id] = .symlink }
-        updateDeployment(skill, to: next, targetID: target.id)
-    }
-
-    /// Switches an existing deployment between a symbolic link and a copy.
-    func setDeploymentMode(_ skill: SkillRecord, target: SkillTarget, _ mode: SkillInstallMode) {
-        guard !isBusy else { return }
-        var next = deployments(of: skill)
-        guard next[target.id] != nil, next[target.id] != mode else { return }
-        next[target.id] = mode
         updateDeployment(skill, to: next, targetID: target.id)
     }
 
@@ -387,7 +387,10 @@ final class SkillsModel: ObservableObject {
             }
             var plan = try await self.library.plan(skill.id, desired: next, targets: targets,
                 targetIDs: [targetID], adopting: [])
-            guard !plan.items.isEmpty else { return }
+            guard !plan.items.isEmpty else {
+                self.notice = L10n.t("This Agent already reads the single source; no extra link is needed.")
+                return
+            }
             if !plan.adoptablePaths.isEmpty,
                plan.items.allSatisfy({ $0.conflict == nil || ($0.adoptable && $0.conflict == SkillError.occupied.rawValue) }) {
                 let initial = plan
@@ -430,7 +433,7 @@ final class SkillsModel: ObservableObject {
             if redeploy {
                 do {
                     self.inlineSkillID = record.skillID
-                    self.inlineDesired = [record.targetID: record.mode]
+                    self.inlineDesired = [record.targetID: .symlink]
                     self.inlineTargetIDs = [record.targetID]
                     self.adopting = []
                     self.undoing = false
@@ -469,6 +472,7 @@ final class SkillsModel: ObservableObject {
             let batch = inlineID == nil && self.isBatch
             let desired = inlineID == nil ? (batch ? self.batchDesired : self.desired) : self.inlineDesired
             let ids = batch ? Array(self.markedIDs) : [id]
+            guard ids.allSatisfy({ id in self.snapshot.skills.first(where: { $0.id == id })?.sourcePath != nil }) else { throw SkillError.sourceUnavailable }
             let targets = self.deploymentTargets
             let visible = self.inlineTargetIDs ?? Set(targets.map(\.id))
             self.plan = batch
@@ -507,7 +511,6 @@ final class SkillsModel: ObservableObject {
             self.adopting = []
             self.publishDiscovered(try await self.library.discover(targets: self.targets))
             if let id = self.selectedID { self.resetDesired(id) }
-            if let id = self.selectedID { self.baseRevision = self.snapshot.skills.first { $0.id == id }?.revision ?? self.baseRevision }
             self.notice = L10n.t("Deployment saved. Reload the Agent if the skill is not listed yet.")
         }
     }
@@ -619,6 +622,11 @@ final class SkillsModel: ObservableObject {
     var updateBlockedReason: String? {
         guard let skill = selected else { return nil }
         if skill.source.kind == .created { return SkillError.noSource.rawValue }
+        if let sourcePath = skill.sourcePath, skill.source.kind == .local {
+            let managed = library.root.appendingPathComponent("sources").resolvingSymlinksInPath().path + "/"
+            if sourcePath.hasPrefix(managed) { return SkillError.sourceIsDeployment.rawValue }
+            return FileManager.default.fileExists(atPath: sourcePath) ? nil : SkillError.sourceUnavailable.rawValue
+        }
         if snapshot.deployments.contains(where: {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path
                 == URL(fileURLWithPath: skill.source.location).standardizedFileURL.path
@@ -661,7 +669,7 @@ final class SkillsModel: ObservableObject {
             self.updateCandidate = nil
             self.checkout?.cleanup(); self.checkout = nil
             try await self.selectNow(skill.id)
-            self.notice = L10n.t("Library version saved. Preview deployment to update your Agents.")
+            self.notice = L10n.t("Source updated. Linked Agents read the new content when reloaded.")
         }
     }
     func dismissUpdate() { updateCandidate = nil; checkout?.cleanup(); checkout = nil }
@@ -709,8 +717,11 @@ final class SkillsModel: ObservableObject {
         desired = saved
     }
     private func refresh() async throws {
-        snapshot = try await library.load()
+        snapshot = try await library.migrateToSingleSource(targetIDs: Set(deploymentTargets.map(\.id)))
         publishDiscovered(try await library.discover(targets: targets))
+        if !snapshot.migrationIssues.isEmpty {
+            notice = L10n.t("Some old deployments were kept unchanged. Review their source or deployment conflicts before reconnecting.")
+        }
     }
     private func publishDiscovered(_ items: [SkillDiscovery]) {
         discovered = items

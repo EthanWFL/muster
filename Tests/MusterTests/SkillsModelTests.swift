@@ -275,7 +275,7 @@ import MusterCore
         #expect(!model.isBusy && FileManager.default.fileExists(atPath: source.path))
     }
 
-    @Test func inlineModeSwitchUpdatesTheExistingDeployment() async throws {
+    @Test func applyingTheSourceUpdatesExistingDeploymentWithoutAnotherPreview() async throws {
         let (library, target, root) = try await makeLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
         let model = SkillsModel(library: library, targets: [target])
@@ -284,10 +284,44 @@ import MusterCore
         model.toggleDeployment(skill, target: target); await model.operationTask?.value
         #expect(model.snapshot.deployments.first?.mode == .symlink)
 
-        model.setDeploymentMode(skill, target: target, .copy); await model.operationTask?.value
+        model.draft += "\nNew shared content"
+        model.publish(); await model.operationTask?.value
         #expect(model.errorMessage == nil)
-        #expect(!model.showsPlan && model.plan == nil)
-        #expect(model.snapshot.deployments.first?.mode == .copy)
+        #expect(!model.showsPlan && model.plan == nil && model.staleDeployments == 0)
+        #expect(model.snapshot.deployments.first?.mode == .symlink)
+        let text = try String(contentsOfFile: target.directory + "/" + skill.name + "/SKILL.md", encoding: .utf8)
+        #expect(text.hasSuffix("New shared content"))
+    }
+
+    @Test func deployingDoesNotRebaseAnOpenDraftOverExternalSourceEdits() async throws {
+        let (library, target, root) = try await makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = SkillsModel(library: library, targets: [target])
+        model.load(); await model.operationTask?.value
+        let skill = try #require(model.selected)
+        model.draft += "\nMy V1 draft"
+        let draft = model.draft
+        let external = model.publishedText + "\nExternal V2"
+        let source = URL(fileURLWithPath: try #require(skill.sourcePath)).appendingPathComponent("SKILL.md")
+        try external.write(to: source, atomically: true, encoding: .utf8)
+        model.beginSelection()
+        model.mark(skill.id)
+        model.setEnabled(target, true)
+        model.preview(); await model.operationTask?.value
+        #expect(model.plan?.canApply == true)
+        model.apply(); await model.operationTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(model.snapshot.deployments.count == 1)
+        #expect(model.draft == draft && model.dirty)
+        #expect(!model.canPublish)
+        model.publish(); await model.operationTask?.value
+        #expect(try String(contentsOf: source, encoding: .utf8) == external)
+        model.discardDraft(); await model.operationTask?.value
+        #expect(model.draft == external)
+        model.draft += "\nNew V2 draft"
+        #expect(model.canPublish)
+        model.publish(); await model.operationTask?.value
+        #expect(try String(contentsOf: source, encoding: .utf8).hasSuffix("New V2 draft"))
     }
 
     @Test func inlineToggleBacksUpAndRestoresExistingSkillWithoutPrompts() async throws {

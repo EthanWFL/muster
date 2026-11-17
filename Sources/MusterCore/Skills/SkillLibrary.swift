@@ -15,17 +15,20 @@ public actor SkillLibrary {
         let after: SkillDeployment?
         /// Forward adoption parks the replaced folder here; undo restores it from here.
         let backup: String?
+        var sourceID: UUID? = nil
+        var sourceReference: String? = nil
     }
     private struct Transaction: Codable {
         let id: UUID
         let changes: [Change]
+        var updatedSources: [SkillRecord]? = nil
     }
     private struct LocalTransition: Codable {
         let entry: SkillSuspension
         let restoring: Bool
     }
     private struct State: Codable {
-        var schema = 1
+        var schema = 2
         var revision: UInt64 = 0
         var skills: [SkillRecord] = []
         var deployments: [SkillDeployment] = []
@@ -39,12 +42,18 @@ public actor SkillLibrary {
         var retainedBackups: [String]? = nil
         var suspended: [SkillSuspension]? = nil
         var pendingLocal: LocalTransition? = nil
+        var migratedAgents: Set<String>? = nil
     }
 
     public init(root: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Muster/library")) { self.root = root }
 
-    public func load() throws -> SkillLibrarySnapshot { try locked { snapshot($0) } }
+    public func load() throws -> SkillLibrarySnapshot {
+        try locked { state in
+            try refreshSources(&state)
+            return snapshot(state)
+        }
+    }
 
     /// Only forget stale metadata after rechecking the exact entry shown to the user.
     /// Foreign files and displaced originals are never removed or restored by this operation.
@@ -70,8 +79,8 @@ public actor SkillLibrary {
     public func content(_ id: UUID) throws -> SkillContent {
         try locked { state in
             guard let record = state.skills.first(where: { $0.id == id }) else { throw SkillError.missing }
-            let directory = try revisionDirectory(record.id, record.revision)
-            let files = try verifiedFiles(record.id, record.revision)
+            let directory = try activeDirectory(record)
+            let files = try activeFiles(record)
             let draft = try? JSONDecoder().decode(SkillDraft.self, from: Data(contentsOf: draftURL(id)))
             var texts = SkillFiles.texts(files)
             // A saved draft shows its own edits, so reopening the editor cannot lose them.
@@ -99,6 +108,25 @@ public actor SkillLibrary {
         let files = try SkillFiles.read(candidate.directory)
         guard SkillFiles.hash(files) == candidate.digest else { throw SkillError.changed }
         return try locked { state in
+            if candidate.source.kind == .local,
+               let existing = state.skills.first(where: { $0.sourcePath == entryIdentity(candidate.source.location) }) {
+                guard existing.name == candidate.name else { throw SkillError.occupied }
+                try refreshSources(&state)
+                return snapshot(state)
+            }
+            if candidate.source.kind == .git,
+               let index = state.skills.firstIndex(where: {
+                   $0.source.kind == .git && $0.source.location == candidate.source.location &&
+                       $0.source.ref == candidate.source.ref && $0.source.subdirectory == candidate.source.subdirectory && $0.name == candidate.name
+               }) {
+                if state.skills[index].revision != candidate.digest {
+                    guard !fm.fileExists(atPath: draftURL(state.skills[index].id).path) else { throw SkillError.changed }
+                    var updated = state.skills[index]
+                    try revise(&updated, files: files, source: candidate.source)
+                    try writeSource(updated, replacing: state.skills[index], state: &state)
+                }
+                return snapshot(state)
+            }
             if state.skills.contains(where: {
                 $0.name == candidate.name && $0.revision == candidate.digest && $0.source.kind == candidate.source.kind
                     && $0.source.location == candidate.source.location && $0.source.ref == candidate.source.ref
@@ -107,8 +135,11 @@ public actor SkillLibrary {
             let (_, document) = try SkillFiles.document(files)
             let id = UUID()
             try storeRevision(id, files: files)
-            state.skills.append(SkillRecord(id: id, name: document.name, summary: document.summary, license: document.license,
-                revision: candidate.digest, revisions: [SkillRevision(id: candidate.digest, date: Date(), source: candidate.source)], source: candidate.source))
+            var skill = SkillRecord(id: id, name: document.name, summary: document.summary, license: document.license,
+                revision: candidate.digest, revisions: [SkillRevision(id: candidate.digest, date: Date(), source: candidate.source)], source: candidate.source)
+            try initializeSource(&skill, files: files, state: state)
+            guard skill.revision == candidate.digest else { throw SkillError.changed }
+            state.skills.append(skill)
             try save(&state)
             return snapshot(state)
         }
@@ -121,8 +152,10 @@ public actor SkillLibrary {
             let id = UUID(), source = SkillSource(kind: .created)
             let files = [SkillFiles.File(path: "SKILL.md", data: Data(text.utf8), executable: false)]
             let digest = try storeRevision(id, files: files)
-            state.skills.append(SkillRecord(id: id, name: name, summary: description, revision: digest,
-                revisions: [SkillRevision(id: digest, date: Date(), source: source)], source: source))
+            var skill = SkillRecord(id: id, name: name, summary: description, revision: digest,
+                revisions: [SkillRevision(id: digest, date: Date(), source: source)], source: source)
+            try initializeSource(&skill, files: files, state: state)
+            state.skills.append(skill)
             try save(&state)
             return snapshot(state)
         }
@@ -136,7 +169,7 @@ public actor SkillLibrary {
             guard document.name == state.skills[index].name else { throw SkillError.unsafeName }
             for path in removed { try SkillFiles.validateRelativePath(path) }
             for path in files.keys { try SkillFiles.validateRelativePath(path) }
-            var next = try verifiedFiles(id, expectedRevision)
+            var next = try activeFiles(state.skills[index])
             // Overwritten, removed and edited paths all drop the published copy first; otherwise the
             // same relative path would appear twice and the revision digest could never match.
             next.removeAll { $0.path == "SKILL.md" || removed.contains($0.path) || files[$0.path] != nil }
@@ -146,8 +179,9 @@ public actor SkillLibrary {
                 let executable = predecessors.first { $0.path == path }?.executable ?? false
                 next.append(SkillFiles.File(path: path, data: Data(body.utf8), executable: executable))
             }
-            try revise(&state.skills[index], files: next, source: state.skills[index].source)
-            try save(&state)
+            var updated = state.skills[index]
+            try revise(&updated, files: next, source: updated.source)
+            try writeSource(updated, replacing: state.skills[index], state: &state)
             try? fm.removeItem(at: draftURL(id))
             return snapshot(state)
         }
@@ -160,8 +194,14 @@ public actor SkillLibrary {
             guard let index = state.skills.firstIndex(where: { $0.id == id }), state.skills[index].revision == expectedRevision else { throw SkillError.changed }
             guard candidate.name == state.skills[index].name else { throw SkillError.unsafeName }
             guard !fm.fileExists(atPath: draftURL(id).path) else { throw SkillError.changed }
-            try revise(&state.skills[index], files: files, source: candidate.source)
-            try save(&state)
+            var updated = state.skills[index]
+            try revise(&updated, files: files, source: candidate.source)
+            if updated.sourcePath.map({ URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }) == candidate.directory.resolvingSymlinksInPath().path {
+                state.skills[index] = updated
+                try save(&state)
+            } else {
+                try writeSource(updated, replacing: state.skills[index], state: &state)
+            }
             return snapshot(state)
         }
     }
@@ -172,11 +212,13 @@ public actor SkillLibrary {
                   let old = state.skills[index].revisions.first(where: { $0.id == revision }),
                   !fm.fileExists(atPath: draftURL(id).path) else { throw SkillError.changed }
             let (_, document) = try SkillFiles.document(verifiedFiles(id, revision))
-            state.skills[index].revision = revision
-            state.skills[index].summary = document.summary
-            state.skills[index].license = document.license
-            state.skills[index].source = old.source
-            try save(&state)
+            var updated = state.skills[index]
+            updated.revision = revision
+            updated.summary = document.summary
+            updated.license = document.license
+            // Restore content, not the stable source address.
+            updated.source.commit = old.source.commit
+            try writeSource(updated, replacing: state.skills[index], state: &state)
             return snapshot(state)
         }
     }
@@ -216,14 +258,15 @@ public actor SkillLibrary {
             guard !state.deployments.contains(where: { $0.skillID == id }),
                   state.suspended?.contains(where: { $0.deployment?.skillID == id }) != true else { throw SkillError.deployed }
             guard !fm.fileExists(atPath: draftURL(id).path) else { throw SkillError.changed }
-            var next = try verifiedFiles(id, expectedRevision)
+            var next = try activeFiles(state.skills[index])
             let (text, _) = try SkillFiles.document(next)
             let retitled = try SkillDocument.retitled(text, to: name)
             next.removeAll { $0.path == "SKILL.md" }
             next.append(SkillFiles.File(path: "SKILL.md", data: Data(retitled.utf8), executable: false))
-            try revise(&state.skills[index], files: next, source: state.skills[index].source)
-            state.skills[index].name = name
-            try save(&state)
+            var updated = state.skills[index]
+            try revise(&updated, files: next, source: updated.source)
+            updated.name = name
+            try writeSource(updated, replacing: state.skills[index], state: &state)
             return snapshot(state)
         }
     }
@@ -234,6 +277,12 @@ public actor SkillLibrary {
             guard let skill = state.skills.first(where: { $0.id == id }) else { throw SkillError.missing }
             guard skill.source.kind != .created else { throw SkillError.noSource }
             if skill.source.kind == .local {
+                if let sourcePath = skill.sourcePath {
+                    let managed = root.appendingPathComponent("sources").resolvingSymlinksInPath().path + "/"
+                    guard !sourcePath.hasPrefix(managed) else { throw SkillError.sourceIsDeployment }
+                    _ = try activeDirectory(skill)
+                    return SkillSource(kind: .local, location: sourcePath)
+                }
                 let location = URL(fileURLWithPath: skill.source.location).standardizedFileURL
                 // After deployment the imported folder is replaced by Muster's own link or copy.
                 // Rescanning it would read the library back to itself and always claim "up to date".
@@ -250,6 +299,7 @@ public actor SkillLibrary {
     public func plan(_ id: UUID, desired: [String: SkillInstallMode], targets: [SkillTarget],
                      targetIDs: Set<String>? = nil, adopting: Set<String> = []) throws -> SkillPlan {
         try locked { state in
+            try refreshSources(&state)
             let planID = UUID()
             let items = try planItems(skillID: id, desired: desired, targets: targets, targetIDs: targetIDs,
                 adopting: adopting, planID: planID, state: state)
@@ -262,6 +312,7 @@ public actor SkillLibrary {
     public func planBatch(_ ids: [UUID], mode: [String: SkillInstallMode], targets: [SkillTarget],
                           targetIDs: Set<String>, adopting: Set<String> = []) throws -> SkillPlan {
         try locked { state in
+            try refreshSources(&state)
             let planID = UUID()
             var items: [SkillPlanItem] = []
             for id in ids {
@@ -384,10 +435,28 @@ public actor SkillLibrary {
                 license: document.license, warning: document.warning, digest: digest, files: files.map(\.path),
                 source: SkillSource(kind: .local, location: discovery.path))
         }
-        let existing = try load().skills.first { $0.name == candidate.name && $0.revision == candidate.digest }
+        let existing = try locked { state -> SkillRecord? in
+            try refreshSources(&state)
+            if let deployment = state.deployments.first(where: { entryIdentity($0.path) == entryIdentity(discovery.path) }) {
+                guard inspect(deployment).status == .active,
+                      let skill = state.skills.first(where: { $0.id == deployment.skillID }),
+                      skill.name == candidate.name, skill.revision == candidate.digest else { throw SkillError.changed }
+                if let source = skill.sourcePath {
+                    guard URL(fileURLWithPath: source).resolvingSymlinksInPath().path == candidate.directory.path else { throw SkillError.changed }
+                }
+                return skill
+            }
+            return state.skills.first {
+                $0.sourcePath == entryIdentity(discovery.path) && $0.name == candidate.name
+            }
+        }
         if let existing { return existing }
+        guard discovery.suspendedID == nil else { throw SkillError.sourceUnavailable }
         let snapshot = try importSkill(candidate)
-        guard let record = snapshot.skills.first(where: { $0.name == candidate.name && $0.revision == candidate.digest }) else { throw SkillError.missing }
+        guard let record = snapshot.skills.first(where: {
+            $0.name == candidate.name && $0.revision == candidate.digest &&
+                ($0.sourcePath == entryIdentity(discovery.path) || $0.source.location == discovery.path)
+        }) else { throw SkillError.missing }
         return record
     }
 
@@ -406,6 +475,10 @@ public actor SkillLibrary {
                     (entryIdentity($0.path) == entryIdentity(entry.path) ||
                      (fingerprint.hasPrefix("tree:") && $0.resolvedPath == resolved))
             }) else { throw SkillError.localSkillShared }
+            guard !state.skills.contains(where: {
+                $0.sourcePath == entryIdentity(entry.path) ||
+                    (fingerprint.hasPrefix("tree:") && $0.sourcePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == resolved)
+            }) else { throw SkillError.sourceCycle }
             guard state.suspended?.contains(where: { $0.path == entry.path }) != true else { throw SkillError.localSkillOccupied }
             let id = UUID()
             let backup = root.appendingPathComponent("disabled/\(id.uuidString)/\(URL(fileURLWithPath: entry.path).lastPathComponent)")
@@ -432,6 +505,15 @@ public actor SkillLibrary {
             guard !state.deployments.contains(where: { $0.path == saved.path }),
                   try SkillFiles.fingerprint(URL(fileURLWithPath: saved.path)) == "missing" else { throw SkillError.localSkillOccupied }
             try transitionLocal(LocalTransition(entry: saved, restoring: true), state: &state)
+            if let before = saved.deployment,
+               let skill = state.skills.first(where: { $0.id == before.skillID }),
+               let source = skill.sourcePath, before.sourcePath != source || before.mode != .symlink {
+                let after = SkillDeployment(skillID: skill.id, targetID: before.targetID, path: before.path, mode: .symlink,
+                    revision: skill.revision, fingerprint: "link:" + source, sourcePath: source)
+                let change = Change(path: before.path, parent: saved.parent, expected: before.fingerprint,
+                    before: before, after: after, backup: nil)
+                try execute(Transaction(id: UUID(), changes: [change], updatedSources: []), state: &state, undo: false)
+            }
             return snapshot(state)
         }
     }
@@ -500,26 +582,39 @@ public actor SkillLibrary {
                            state: State) throws -> [SkillPlanItem] {
         guard let skill = state.skills.first(where: { $0.id == skillID }) else { throw SkillError.missing }
         _ = try verifiedFiles(skillID, skill.revision)
-        let publishedDirectory = try revisionDirectory(skillID, skill.revision)
+        let publishedDirectory = try activeDirectory(skill)
+        _ = try activeFiles(skill)
         let old = state.deployments.filter { $0.skillID == skillID }
         var items: [SkillPlanItem] = []
         for targetID in Set(desired.keys).union(old.map(\.targetID)).sorted() {
             guard targetIDs?.contains(targetID) ?? true else { continue }
             let before = old.first { $0.targetID == targetID }
             let target = targets.first { $0.id == targetID }
-            let mode = desired[targetID]
+            // Copies remain decodable for old journals; every new single-source deployment is a link.
+            let mode: SkillInstallMode? = desired[targetID].map { skill.sourcePath == nil ? $0 : .symlink }
             if mode != nil, target?.directory.hasPrefix("/") != true { throw SkillError.invalidPath }
             guard let path = mode == nil ? before?.path : target.map({ URL(fileURLWithPath: $0.directory).appendingPathComponent(skill.name).path }), path.hasPrefix("/") else { throw SkillError.invalidPath }
             if let before, before.path != path { throw SkillError.changed }
             let url = URL(fileURLWithPath: path)
             let current = (try? SkillFiles.fingerprint(url)) ?? "unreadable"
+            if let source = skill.sourcePath {
+                if entryIdentity(path) == source || entryIdentity(path) == publishedDirectory.path {
+                    if mode != nil && before == nil { continue } // The real source already serves this Agent.
+                    throw SkillError.sourceCycle
+                }
+                guard !source.hasPrefix(entryIdentity(path) + "/"),
+                      !publishedDirectory.path.hasPrefix(entryIdentity(path) + "/") else { throw SkillError.sourceCycle }
+            }
             let after = mode.map { mode in
                 SkillDeployment(skillID: skillID, targetID: targetID, path: path, mode: mode, revision: skill.revision,
-                    fingerprint: mode == .symlink ? "link:" + publishedDirectory.path : "tree:" + skill.revision)
+                    fingerprint: mode == .symlink ? "link:" + (skill.sourcePath ?? publishedDirectory.path) : "tree:" + skill.revision,
+                    sourcePath: mode == .symlink ? skill.sourcePath : nil)
             }
             let occupied = before == nil && current != "missing"
             let replaces = occupied && adopting.contains(path) && Self.isSkillEntry(url)
             if before == after && current == after?.fingerprint { continue }
+            if let before, let after, before.sourcePath != nil, before.sourcePath == after.sourcePath,
+               before.mode == .symlink, after.mode == .symlink, current == after.fingerprint { continue }
             var conflict: String?
             if let before, current != before.fingerprint {
                 conflict = current == "missing"
@@ -590,7 +685,7 @@ public actor SkillLibrary {
                 try check(change)
                 try perform(change)
             }
-            for change in transaction.changes {
+            for change in transaction.changes where change.sourceID == nil {
                 state.deployments.removeAll { $0.path == change.path }
                 if let after = change.after { state.deployments.append(after) }
                 // A backup next to an install is an adoption; a backup next to a removal is the
@@ -601,8 +696,12 @@ public actor SkillLibrary {
                     } else { state.restores?[change.path] = nil }
                 }
             }
+            for updated in transaction.updatedSources ?? [] {
+                guard let index = state.skills.firstIndex(where: { $0.id == updated.id }) else { throw SkillError.missing }
+                state.skills[index] = updated
+            }
             if undo { state.history.removeLast() }
-            else { state.history.append(transaction); state.history = Array(state.history.suffix(20)) }
+            else if transaction.updatedSources == nil { state.history.append(transaction); state.history = Array(state.history.suffix(20)) }
             state.pending = nil
             try save(&state)
             pruneBackups(state)
@@ -624,7 +723,9 @@ public actor SkillLibrary {
             // Only a destination that matches what this transaction wrote can be rolled back.
             guard current == (change.after?.fingerprint ?? "missing") else { throw SkillError.recovery }
             let inverse = Change(path: change.path, parent: change.parent, expected: current,
-                before: change.after, after: change.before, backup: change.backup)
+                before: change.after, after: change.before, backup: change.backup,
+                sourceID: change.sourceID, sourceReference: change.sourceReference)
+            try check(inverse)
             try perform(inverse)
         }
         state.pending = nil
@@ -633,6 +734,9 @@ public actor SkillLibrary {
 
     private func check(_ change: Change) throws {
         let url = URL(fileURLWithPath: change.path)
+        if let source = change.sourceReference {
+            guard URL(fileURLWithPath: source).resolvingSymlinksInPath().path == change.path else { throw SkillError.changed }
+        }
         guard url.deletingLastPathComponent().resolvingSymlinksInPath().path == change.parent,
               try SkillFiles.fingerprint(url) == change.expected else { throw SkillError.changed }
     }
@@ -649,7 +753,7 @@ public actor SkillLibrary {
                 try SkillFiles.move(destination, to: URL(fileURLWithPath: backup))
                 try place(after, at: destination, replacing: false)
             } else {
-                try place(after, at: destination, replacing: current != "missing")
+                try place(after, at: destination, replacing: current != "missing", preservingSource: change.sourceID != nil)
             }
         } else {
             if current != "missing" { try SkillFiles.discard(destination) }
@@ -660,14 +764,29 @@ public actor SkillLibrary {
         }
     }
 
-    private func place(_ deployment: SkillDeployment, at destination: URL, replacing: Bool) throws {
+    private func place(_ deployment: SkillDeployment, at destination: URL, replacing: Bool, preservingSource: Bool = false) throws {
         let parent = destination.deletingLastPathComponent()
         let temporary = parent.appendingPathComponent(".muster-skill-" + UUID().uuidString)
         defer { try? fm.removeItem(at: temporary) }
         let files = try verifiedFiles(deployment.skillID, deployment.revision)
         if deployment.mode == .symlink {
-            try fm.createSymbolicLink(atPath: temporary.path, withDestinationPath: revisionDirectory(deployment.skillID, deployment.revision).path)
-        } else { try SkillFiles.write(files, to: temporary) }
+            let source = try deployment.sourcePath ?? revisionDirectory(deployment.skillID, deployment.revision).path
+            if deployment.sourcePath != nil {
+                let directory = URL(fileURLWithPath: source)
+                guard entryIdentity(source) == source,
+                      (try? SkillFiles.document(SkillFiles.read(directory.resolvingSymlinksInPath())).1.name) == (try SkillFiles.document(files).1.name) else { throw SkillError.sourceUnavailable }
+            }
+            let resolved = URL(fileURLWithPath: source).resolvingSymlinksInPath().path
+            guard entryIdentity(destination.path) != source, entryIdentity(destination.path) != resolved,
+                  !source.hasPrefix(entryIdentity(destination.path) + "/"),
+                  !resolved.hasPrefix(entryIdentity(destination.path) + "/") else { throw SkillError.sourceCycle }
+            try fm.createSymbolicLink(atPath: temporary.path, withDestinationPath: source)
+        } else {
+            try SkillFiles.write(files, to: temporary)
+            if preservingSource, replacing {
+                try SkillFiles.preserveExcludedEntries(from: destination, to: temporary)
+            }
+        }
         // Atomically exchange entries when replacing. The previous one stays at `temporary`
         // until cleanup; the journal can rebuild it from the immutable revision or backup.
         if replacing {
@@ -693,6 +812,146 @@ public actor SkillLibrary {
             return fm.fileExists(atPath: resolved.appendingPathComponent("SKILL.md").path)
         }
         return info.st_mode & S_IFMT == S_IFDIR && fm.fileExists(atPath: url.appendingPathComponent("SKILL.md").path)
+    }
+
+    /// Upgrade recorded, unchanged deployments only. Foreign edits are never overwritten.
+    public func migrateToSingleSource(targetIDs: Set<String>) throws -> SkillLibrarySnapshot {
+        guard !targetIDs.isEmpty else { return try load() }
+        return try locked { state in
+            // Retry unresolved legacy records even if an older build marked the Agent complete.
+            let unresolvedTargets = Set(state.deployments.filter { deployment in
+                guard let skill = state.skills.first(where: { $0.id == deployment.skillID }) else { return false }
+                return skill.sourcePath == nil || deployment.mode != .symlink || deployment.sourcePath != skill.sourcePath
+            }.map(\.targetID)).intersection(targetIDs)
+            let pendingTargets = targetIDs.subtracting(state.migratedAgents ?? []).union(unresolvedTargets)
+            if pendingTargets.isEmpty && state.skills.allSatisfy({ $0.sourcePath != nil }) {
+                try refreshSources(&state); return snapshot(state)
+            }
+            var updated: [SkillRecord] = []
+            var warnings: [String] = []
+            for record in state.skills where record.sourcePath == nil {
+                do {
+                    var next = record
+                    try initializeSource(&next, files: verifiedFiles(record.id, record.revision), state: state)
+                    updated.append(next)
+                } catch { warnings.append(record.name + ": " + error.localizedDescription) }
+            }
+            let skills = Dictionary(uniqueKeysWithValues: (state.skills.filter { original in !updated.contains { $0.id == original.id } } + updated).map { ($0.id, $0) })
+            var changes: [Change] = []
+            for before in state.deployments where pendingTargets.contains(before.targetID) {
+                guard let skill = skills[before.skillID], let source = skill.sourcePath else { continue }
+                if before.mode == .symlink && before.sourcePath == source { continue }
+                guard inspect(before).status == .active,
+                      source != entryIdentity(before.path), !source.hasPrefix(entryIdentity(before.path) + "/") else {
+                    warnings.append(skill.name + " / " + before.targetID + ": " + SkillError.changed.rawValue)
+                    continue
+                }
+                let after = SkillDeployment(skillID: skill.id, targetID: before.targetID, path: before.path,
+                    mode: .symlink, revision: skill.revision, fingerprint: "link:" + source, sourcePath: source)
+                changes.append(Change(path: before.path,
+                    parent: URL(fileURLWithPath: before.path).deletingLastPathComponent().resolvingSymlinksInPath().path,
+                    expected: before.fingerprint, before: before, after: after, backup: nil))
+            }
+            if !changes.isEmpty || !updated.isEmpty {
+                if let manifestBytes {
+                    try atomicWrite(manifestBytes, to: root.appendingPathComponent("migration-backups/\(UUID().uuidString).json"))
+                }
+                let paths = Set(changes.map(\.path))
+                let obsolete = state.history.filter { $0.changes.contains { paths.contains($0.path) } }
+                state.retainedBackups = Array(Set((state.retainedBackups ?? []) + obsolete.flatMap { $0.changes.compactMap(\.backup) }))
+                state.history.removeAll { transaction in obsolete.contains { $0.id == transaction.id } }
+                try execute(Transaction(id: UUID(), changes: changes, updatedSources: updated), state: &state, undo: false)
+            }
+            let incompleteTargets = Set(state.deployments.filter { deployment in
+                guard pendingTargets.contains(deployment.targetID), let skill = skills[deployment.skillID] else { return false }
+                return skill.sourcePath == nil || deployment.mode != .symlink || deployment.sourcePath != skill.sourcePath
+            }.map(\.targetID))
+            state.migratedAgents = (state.migratedAgents ?? []).union(pendingTargets).subtracting(incompleteTargets)
+            try save(&state)
+            try refreshSources(&state)
+            var result = snapshot(state)
+            result.migrationIssues += warnings
+            return result
+        }
+    }
+
+    private func activeDirectory(_ skill: SkillRecord) throws -> URL {
+        guard let path = skill.sourcePath else { return try revisionDirectory(skill.id, skill.revision) }
+        let url = URL(fileURLWithPath: path)
+        let resolved = url.resolvingSymlinksInPath()
+        guard entryIdentity(path) == path,
+              (try? fm.attributesOfItem(atPath: resolved.path)[.type] as? FileAttributeType) == .typeDirectory else {
+            throw SkillError.sourceUnavailable
+        }
+        return resolved
+    }
+
+    private func activeFiles(_ skill: SkillRecord) throws -> [SkillFiles.File] {
+        let files = try SkillFiles.read(activeDirectory(skill))
+        guard SkillFiles.hash(files) == skill.revision,
+              try SkillFiles.document(files).1.name == skill.name else { throw SkillError.changed }
+        return files
+    }
+
+    private func managedSource(_ id: UUID, name: String) -> URL {
+        root.appendingPathComponent("sources/\(id.uuidString)/\(name)").standardizedFileURL
+    }
+
+    private func initializeSource(_ skill: inout SkillRecord, files: [SkillFiles.File], state: State) throws {
+        if skill.source.kind == .local {
+            let original = URL(fileURLWithPath: skill.source.location)
+            let resolved = original.resolvingSymlinksInPath()
+            let insideLibrary = resolved.path.hasPrefix(root.resolvingSymlinksInPath().path + "/")
+            let owned = state.deployments.contains { entryIdentity($0.path) == entryIdentity(original.path) }
+            if !insideLibrary, !owned, fm.fileExists(atPath: resolved.path) {
+                let sourceFiles = try SkillFiles.read(resolved)
+                guard try SkillFiles.document(sourceFiles).1.name == skill.name else { throw SkillError.changed }
+                skill.sourcePath = entryIdentity(original.path)
+                try revise(&skill, files: sourceFiles, source: skill.source)
+                return
+            }
+        }
+        let directory = managedSource(skill.id, name: skill.name)
+        if fm.fileExists(atPath: directory.path) {
+            guard SkillFiles.hash(try SkillFiles.read(directory)) == SkillFiles.hash(files) else { throw SkillError.changed }
+        } else { try SkillFiles.write(files, to: directory) }
+        skill.sourcePath = directory.resolvingSymlinksInPath().path
+    }
+
+    /// Observe external edits without changing any source or Agent file.
+    private func refreshSources(_ state: inout State) throws {
+        var changed = false
+        for index in state.skills.indices where state.skills[index].sourcePath != nil {
+            guard let directory = try? activeDirectory(state.skills[index]),
+                  let files = try? SkillFiles.read(directory),
+                  let document = try? SkillFiles.document(files).1,
+                  document.name == state.skills[index].name else { continue }
+            if SkillFiles.hash(files) != state.skills[index].revision {
+                try revise(&state.skills[index], files: files, source: state.skills[index].source)
+                changed = true
+            }
+        }
+        if changed { try save(&state) }
+    }
+
+    /// Reuse the deployment journal for atomic directory replacement and crash rollback.
+    private func writeSource(_ updated: SkillRecord, replacing previous: SkillRecord, state: inout State) throws {
+        _ = try activeFiles(previous)
+        guard previous.sourcePath != nil else {
+            guard let index = state.skills.firstIndex(where: { $0.id == updated.id }) else { throw SkillError.missing }
+            state.skills[index] = updated
+            try save(&state)
+            return
+        }
+        let path = try activeDirectory(previous).path
+        let before = SkillDeployment(skillID: previous.id, targetID: "source", path: path, mode: .copy,
+            revision: previous.revision, fingerprint: "tree:" + previous.revision)
+        let after = SkillDeployment(skillID: updated.id, targetID: "source", path: path, mode: .copy,
+            revision: updated.revision, fingerprint: "tree:" + updated.revision)
+        let change = Change(path: path, parent: URL(fileURLWithPath: path).deletingLastPathComponent().resolvingSymlinksInPath().path,
+            expected: before.fingerprint, before: before, after: after, backup: nil, sourceID: updated.id,
+            sourceReference: previous.sourcePath)
+        try execute(Transaction(id: UUID(), changes: [change], updatedSources: [updated]), state: &state, undo: false)
     }
 
     private func revise(_ skill: inout SkillRecord, files: [SkillFiles.File], source: SkillSource) throws {
@@ -771,17 +1030,26 @@ public actor SkillLibrary {
     }
 
     private func snapshot(_ state: State) -> SkillLibrarySnapshot {
-        SkillLibrarySnapshot(revision: state.revision, skills: state.skills.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+        var issues: [UUID: String] = [:]
+        for skill in state.skills where skill.sourcePath != nil {
+            do { _ = try activeFiles(skill) } catch { issues[skill.id] = error.localizedDescription }
+        }
+        let legacy = state.deployments.filter { $0.sourcePath == nil || $0.mode == .copy }
+            .map { $0.targetID + ": " + $0.path }
+        return SkillLibrarySnapshot(revision: state.revision, skills: state.skills.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
             deployments: state.deployments, canUndo: !state.history.isEmpty,
             deploymentInspections: Dictionary(uniqueKeysWithValues: state.deployments.map { ($0.id, inspect($0)) }),
-            suspendedSkillIDs: Set((state.suspended ?? []).compactMap { $0.deployment?.skillID }))
+            suspendedSkillIDs: Set((state.suspended ?? []).compactMap { $0.deployment?.skillID }),
+            sourceIssues: issues, migrationIssues: legacy)
     }
     private func save(_ state: inout State) throws { state.revision += 1; try persist(state) }
     private func persist(_ state: State) throws {
         let url = root.appendingPathComponent("skills.json")
         let current = fm.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil
         guard current == manifestBytes else { throw SkillError.changed }
-        let data = try JSONEncoder().encode(state)
+        var persisted = state
+        persisted.schema = 2 // Older apps must fail closed instead of treating live sources as immutable versions.
+        let data = try JSONEncoder().encode(persisted)
         try atomicWrite(data, to: url)
         manifestBytes = data
     }
@@ -805,7 +1073,7 @@ public actor SkillLibrary {
         var state: State
         do {
             state = try manifestBytes.map { try JSONDecoder().decode(State.self, from: $0) } ?? State()
-            guard state.schema == 1, state.revision < UInt64.max,
+            guard [1, 2].contains(state.schema), state.revision < UInt64.max,
                   Set(state.skills.map(\.id)).count == state.skills.count,
                   Set(state.deployments.map(\.path)).count == state.deployments.count else { throw SkillError.corrupt }
             for record in state.skills { try SkillDocument.validateName(record.name) }

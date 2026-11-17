@@ -74,6 +74,8 @@ public enum SkillPaths {
 
 /// Bounded, no-follow file traversal shared by imports, fingerprints and copies.
 enum SkillFiles {
+    private static let excludedNames: Set<String> = [".git", ".DS_Store"]
+
     struct File {
         let path: String
         let data: Data
@@ -89,7 +91,7 @@ enum SkillFiles {
             for url in try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).sorted(by: { $0.path < $1.path }) {
                 try Task.checkCancellation()
                 let name = url.lastPathComponent
-                if name == ".git" || name == ".DS_Store" { continue }
+                if excludedNames.contains(name) { continue }
                 visited += 1
                 guard visited <= 2_000 else { throw SkillError.tooLarge }
                 let attrs = try fm.attributesOfItem(atPath: url.path)
@@ -149,6 +151,32 @@ enum SkillFiles {
         }
     }
 
+    /// Excluded entries belong to the source owner, not to a published revision.
+    static func preserveExcludedEntries(from source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        var visited = 0
+        func walk(_ directory: URL, _ relative: String, _ depth: Int) throws {
+            guard depth <= 20 else { throw SkillError.tooLarge }
+            guard try fm.attributesOfItem(atPath: directory.path)[.type] as? FileAttributeType == .typeDirectory else { throw SkillError.unsafeTree }
+            for entry in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+                let name = entry.lastPathComponent
+                let path = relative + name
+                if excludedNames.contains(name) {
+                    let target = destination.appendingPathComponent(path)
+                    try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fm.copyItem(at: entry, to: target)
+                    continue
+                }
+                visited += 1
+                guard visited <= 2_000 else { throw SkillError.tooLarge }
+                if try fm.attributesOfItem(atPath: entry.path)[.type] as? FileAttributeType == .typeDirectory {
+                    try walk(entry, path + "/", depth + 1)
+                }
+            }
+        }
+        try walk(source, "", 0)
+    }
+
     static func fingerprint(_ url: URL) throws -> String {
         var info = stat()
         if lstat(url.path, &info) != 0 {
@@ -183,7 +211,7 @@ enum SkillFiles {
         else { throw SkillError.invalidFileName }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !parts.isEmpty, parts.allSatisfy({ part in
-            !part.isEmpty && part != "." && part != ".." && part.utf8.count <= 255
+            !part.isEmpty && part != "." && part != ".." && !excludedNames.contains(String(part)) && part.utf8.count <= 255
         }) else { throw SkillError.invalidFileName }
     }
 

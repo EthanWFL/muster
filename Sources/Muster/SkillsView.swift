@@ -167,8 +167,8 @@ struct SkillsView: View {
                     VStack(alignment: .leading, spacing: T.s1) {
                         HStack(spacing: T.s2) {
                             Text(skill.name).font(T.body.weight(.medium)).lineLimit(1)
-                            if deployments.contains(where: { $0.revision != skill.revision }) {
-                                Text(L10n.t("Needs update")).font(T.micro).foregroundStyle(T.amber)
+                            if deployments.contains(where: { $0.mode != .symlink || $0.sourcePath != skill.sourcePath || (skill.sourcePath == nil && $0.revision != skill.revision) }) {
+                                Text(L10n.t("Needs relinking")).font(T.micro).foregroundStyle(T.amber)
                             }
                         }
                         Text(skill.summary).font(T.small).foregroundStyle(T.muted).lineLimit(1)
@@ -200,6 +200,10 @@ struct SkillsView: View {
     private func agentToggle(_ skill: SkillRecord, agent: AgentDescriptor, target: SkillTarget?, deployment: SkillDeployment?) -> some View {
         let inspection = deployment.flatMap { model.snapshot.deploymentInspections[$0.id] }
         let deployed = inspection?.status == .active
+        let sourceVisible = skill.sourcePath != nil && model.discovered.contains {
+            $0.suspendedID == nil && $0.resolvedPath == skill.sourcePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } && $0.readers.contains(agent.id)
+        }
+        let visible = deployed || sourceVisible
         let label = L10n.t(deployed ? "Disable in %@" : "Enable in %@", agent.name)
         let shared = model.discovered.contains { $0.name == skill.name && $0.isShared && $0.readers.contains(agent.id) }
         let sharedNote = shared || !(target?.sharedReaders.isEmpty ?? true)
@@ -209,6 +213,8 @@ struct SkillsView: View {
             hint = agent.name + " · " + L10n.t(inspection.status == .missing
                 ? "Deployment is missing. Click to clear its record or redeploy."
                 : "Deployment changed outside Muster. Click to resolve ownership.")
+        } else if sourceVisible && !deployed {
+            hint = agent.name + " · " + L10n.t("This Agent already reads the single source; no extra link is needed.")
         } else if let target {
             hint = label + " · " + (target.directory as NSString).abbreviatingWithTildeInPath + sharedNote
         } else {
@@ -220,8 +226,8 @@ struct SkillsView: View {
             if let target { model.toggleDeployment(skill, target: target) }
         } label: {
             AgentLogo(agentID: agent.id, mark: agent.id == "pi" ? "π" : String(agent.name.prefix(1)), size: 19)
-                .saturation(deployed ? 1 : 0)
-                .opacity(deployed ? 1 : 0.35)
+                .saturation(visible ? 1 : 0)
+                .opacity(visible ? 1 : 0.35)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7).fill(T.card2))
                 .contentShape(RoundedRectangle(cornerRadius: 7))
@@ -230,17 +236,10 @@ struct SkillsView: View {
         .disabled(target == nil)
         .help(hint)
         .accessibilityLabel(agent.name)
-        .accessibilityValue(L10n.t(deployed ? "Enabled" : "Disabled"))
+        .accessibilityValue(L10n.t(visible ? "Enabled" : "Disabled"))
         .contextMenu {
             if let target {
                 Button(label) { model.toggleDeployment(skill, target: target) }
-                if let deployment, deployed {
-                    Divider()
-                    Button(L10n.t("Use symbolic link")) { model.setDeploymentMode(skill, target: target, .symlink) }
-                        .disabled(deployment.mode == .symlink)
-                    Button(L10n.t("Use a copy")) { model.setDeploymentMode(skill, target: target, .copy) }
-                        .disabled(deployment.mode == .copy)
-                }
             }
         }
     }
@@ -276,6 +275,9 @@ struct SkillsView: View {
                         if let reason = model.updateBlockedReason, skill.source.kind != .created {
                             Label(L10n.t(reason), systemImage: "exclamationmark.triangle")
                                 .font(T.micro).foregroundStyle(T.amber).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let issue = model.snapshot.sourceIssues[skill.id] {
+                            Text(L10n.t(issue)).font(T.small).foregroundStyle(T.red)
                         }
                         DisclosureGroup(L10n.t("Source and version")) { source(skill).padding(.top, T.s2) }
                             .font(T.small).foregroundStyle(T.muted)
@@ -348,7 +350,7 @@ struct SkillsView: View {
             HStack {
                 Text("SKILL.md").font(T.section)
                 Spacer()
-                Text(L10n.t("Editing the draft leaves deployed versions unchanged.")).font(T.micro).foregroundStyle(T.muted)
+                Text(L10n.t("Applying changes updates the single source for all linked Agents.")).font(T.micro).foregroundStyle(T.muted)
             }
             TextEditor(text: $model.draft).font(T.mono).foregroundStyle(T.fg).scrollContentBackground(.hidden)
                 .padding(T.s2).frame(minHeight: 220).background(RoundedRectangle(cornerRadius: T.r).fill(T.card))
@@ -407,7 +409,7 @@ struct SkillsView: View {
     }
 
     private var draftStatus: some View {
-        Text(L10n.t(model.unsaved ? "Unsaved changes" : (model.dirty ? "Draft saved, not published" : "Matches the published version")))
+        Text(L10n.t(model.unsaved ? "Unsaved changes" : (model.dirty ? "Draft saved, not published" : "Matches the current source")))
             .font(T.small).foregroundStyle(T.muted)
     }
     private var editorActions: some View {
@@ -415,12 +417,12 @@ struct SkillsView: View {
             Button(L10n.t("Discard")) { model.discardDraft() }.buttonStyle(PillButtonStyle(kind: .quiet)).disabled(!model.dirty || model.isBusy)
             Button(L10n.t("Save draft")) { model.saveDraft() }.buttonStyle(PillButtonStyle(kind: .secondary))
                 .keyboardShortcut("s").disabled(!model.unsaved || model.isBusy)
-            Button(L10n.t("Publish to library")) { model.publish() }.buttonStyle(PillButtonStyle(kind: .primary)).disabled(!model.canPublish)
+            Button(L10n.t("Apply to source")) { model.publish() }.buttonStyle(PillButtonStyle(kind: .primary)).disabled(!model.canPublish)
         }.fixedSize()
     }
     private func source(_ skill: SkillRecord) -> some View {
         VStack(alignment: .leading, spacing: T.s1) {
-            Text(skill.source.kind == .created ? L10n.t("Created in Muster") : skill.source.location)
+            Text(skill.sourcePath ?? (skill.source.kind == .created ? L10n.t("Created in Muster") : skill.source.location))
                 .font(T.monoMicro).foregroundStyle(T.muted).lineLimit(2).textSelection(.enabled)
             HStack(spacing: T.s2) {
                 Text(L10n.t("Version %@", String(skill.revision.prefix(8))))
@@ -468,9 +470,7 @@ struct SkillsView: View {
                 Toggle(target.name, isOn: Binding(get: { model.isEnabled(target) }, set: { model.setEnabled(target, $0) }))
                     .toggleStyle(.checkbox).font(T.body)
                 Spacer(minLength: T.s2)
-                InlineSelect(items: SkillInstallMode.allCases, label: { L10n.t($0 == .symlink ? "Symbolic link" : "Copy") },
-                    selection: Binding(get: { model.mode(target) }, set: { model.setMode(target, $0) }))
-                    .disabled(!model.isEnabled(target))
+                Text(L10n.t("Symbolic link")).font(T.micro).foregroundStyle(T.muted)
             }
             Text((target.directory as NSString).abbreviatingWithTildeInPath).font(T.monoMicro).foregroundStyle(T.muted).lineLimit(1).truncationMode(.middle)
             if target.sharedReaders.isEmpty,
@@ -537,7 +537,7 @@ private struct SkillImportSheet: View {
                 }
             }.frame(height: 240).disabled(model.isBusy)
             if let error = model.errorMessage { Text(error).font(T.small).foregroundStyle(T.red) }
-            Text(L10n.t("Import copies the complete skill folder into Muster. Original files and Agent deployments stay unchanged."))
+            Text(L10n.t("Local imports keep their source folder. Git imports use a stable Muster source. Updates to a source are shared by all its linked Agents."))
                 .font(T.small).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
@@ -630,7 +630,7 @@ private struct SkillUpdateSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: T.s3) {
             Text(L10n.t("Review skill update")).font(.title2)
-            Text(L10n.t("The complete folder will be replaced in the library. Agent deployments are updated separately."))
+            Text(L10n.t("Applying changes updates the single source for all linked Agents."))
                 .font(T.small).foregroundStyle(T.muted)
             HStack(alignment: .top) {
                 preview("Current version", text: model.publishedText)
@@ -644,7 +644,7 @@ private struct SkillUpdateSheet: View {
                 Button(L10n.t("Reveal in Finder")) { model.reveal(candidate.directory.path) }.buttonStyle(PillButtonStyle(kind: .secondary))
                 Spacer()
                 Button(L10n.t("Cancel")) { dismiss() }.buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.isBusy)
-                Button(L10n.t("Update library")) { model.applyUpdate() }.buttonStyle(PillButtonStyle(kind: .primary)).disabled(model.isBusy)
+                Button(L10n.t("Update source")) { model.applyUpdate() }.buttonStyle(PillButtonStyle(kind: .primary)).disabled(model.isBusy)
             }
         }.padding(T.s4).frame(width: 720).interactiveDismissDisabled(model.isBusy)
     }

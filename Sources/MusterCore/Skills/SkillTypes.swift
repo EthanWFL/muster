@@ -1,6 +1,8 @@
 import Foundation
 
 public enum SkillError: String, LocalizedError {
+    case sourceUnavailable = "The single source is missing, invalid, or redirected. Restore it before editing or deploying."
+    case sourceCycle = "This destination is the skill's source, or contains its source. It cannot be replaced with a link."
     case localSkillShared = "This skill is visible through a shared or duplicate source. It cannot be disabled for this Agent alone."
     case localSkillOccupied = "The original skill path is occupied. Its saved entry was kept; move the conflicting entry before restoring."
     case outsideScope = "This deployment includes Agents outside the current scope. Select them in Settings before restoring it."
@@ -54,6 +56,8 @@ public struct SkillRecord: Codable, Equatable, Identifiable, Sendable {
     public var revision: String
     public var revisions: [SkillRevision]
     public var source: SkillSource
+    /// Stable active directory. Nil denotes an older version-pinned library entry.
+    public var sourcePath: String? = nil
 }
 
 public struct SkillCandidate: Identifiable, Sendable {
@@ -95,6 +99,8 @@ public struct SkillDeployment: Codable, Equatable, Identifiable, Sendable {
     public let mode: SkillInstallMode
     public let revision: String
     public let fingerprint: String
+    /// Stable source used by new symlinks; nil preserves legacy undo records.
+    public var sourcePath: String? = nil
 }
 
 public struct SkillPlanItem: Identifiable, Sendable {
@@ -217,5 +223,7 @@ public struct SkillLibrarySnapshot: Sendable {
     public let canUndo: Bool
     public var deploymentInspections: [String: SkillDeploymentInspection] = [:]
     public var suspendedSkillIDs: Set<UUID> = []
+    public var sourceIssues: [UUID: String] = [:]
+    public var migrationIssues: [String] = []
     public static let empty = Self(revision: 0, skills: [], deployments: [], canUndo: false)
 }

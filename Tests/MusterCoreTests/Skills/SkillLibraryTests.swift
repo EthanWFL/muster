@@ -50,7 +50,7 @@ import Testing
         #expect(try await f.library.load().skills.isEmpty)
     }
 
-    @Test func draftAndPublishedVersionLeaveDeployedLinkUnchangedUntilApply() async throws {
+    @Test func draftLeavesSourceUnchangedButApplyUpdatesEveryLinkedAgent() async throws {
         let f = try SkillFixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
         let enabled = try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: f.targets)
@@ -63,15 +63,16 @@ import Testing
         #expect(try await f.library.content(skill.id).draft?.text == text)
         let published = try await f.library.publish(skill.id, expectedRevision: skill.revision, text: text)
         #expect(published.skills[0].revision != skill.revision)
-        #expect(try String(contentsOf: f.destination(0), encoding: .utf8) == original)
-        _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .symlink], targets: f.targets))
         #expect(try String(contentsOf: f.destination(0), encoding: .utf8) == text)
+        #expect(try String(contentsOf: f.source.appendingPathComponent("SKILL.md"), encoding: .utf8) == text)
+        #expect(try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: f.targets).items.isEmpty)
         #expect(try await f.library.content(skill.id).draft == nil)
     }
 
     @Test func linksCopiesDisableAndUndoRoundTrip() async throws {
         let f = try SkillFixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        try markSkillSourcesAsLegacy(manifest: f.root.appendingPathComponent("library/skills.json"))
         _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .symlink, "pi": .copy], targets: f.targets))
         #expect(try FileManager.default.attributesOfItem(atPath: f.destination(0).deletingLastPathComponent().path)[.type] as? FileAttributeType == .typeSymbolicLink)
         #expect(try FileManager.default.attributesOfItem(atPath: f.destination(1).deletingLastPathComponent().path)[.type] as? FileAttributeType == .typeDirectory)
@@ -87,6 +88,7 @@ import Testing
     @Test func refusesForeignEntriesAndModifiedManagedCopies() async throws {
         let f = try SkillFixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
+        try markSkillSourcesAsLegacy(manifest: f.root.appendingPathComponent("library/skills.json"))
         try FileManager.default.createDirectory(at: f.destination(0).deletingLastPathComponent(), withIntermediateDirectories: true)
         try "mine".write(to: f.destination(0), atomically: true, encoding: .utf8)
         let collision = try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: f.targets)
@@ -208,6 +210,7 @@ extension SkillLibraryTests {
         let f = try SkillFixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
         let file = f.root.appendingPathComponent("library/skills.json")
+        try markSkillSourcesAsLegacy(manifest: file)
         let before = try Data(contentsOf: file)
         _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .copy], targets: f.targets))
         let completed = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
@@ -324,18 +327,14 @@ extension SkillLibraryTests {
         #expect(!FileManager.default.fileExists(atPath: f.root.appendingPathComponent("library/skills/\(skill.id.uuidString)").path))
     }
 
-    @Test func aLocalSourceThatMusterNowDeploysIntoIsNoLongerAnUpdateSource() async throws {
+    @Test func localSourceIsNeverReplacedByALinkToItself() async throws {
         let f = try SkillFixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.importSkill(f.candidate()).skills.first)
-        #expect(try await f.library.updateSource(skill.id).location == f.source.path)
-        // Importing `~/.claude/skills/review` and deploying to `~/.claude/skills` means the destination
-        // *is* the imported folder, so it has to be adopted before the deployment can happen.
         let target = SkillTarget(id: "claude", name: "Claude", directory: f.source.deletingLastPathComponent().path)
-        let occupied = try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: [target])
-        #expect(occupied.adoptablePaths == [f.source.path])
-        _ = try await f.library.apply(f.library.plan(skill.id, desired: ["claude": .symlink], targets: [target],
-            adopting: [f.source.path]))
-        await #expect(throws: SkillError.sourceIsDeployment) { try await f.library.updateSource(skill.id) }
+        let plan = try await f.library.plan(skill.id, desired: ["claude": .symlink], targets: [target], adopting: [f.source.path])
+        #expect(plan.items.isEmpty)
+        #expect(try FileManager.default.attributesOfItem(atPath: f.source.path)[.type] as? FileAttributeType == .typeDirectory)
+        #expect(try await f.library.updateSource(skill.id).location == skill.sourcePath)
     }
 
     @Test func onePlanCanDeploySeveralSkillsAndDisableAllOfThem() async throws {

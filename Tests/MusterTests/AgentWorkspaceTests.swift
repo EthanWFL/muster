@@ -157,6 +157,13 @@ extension AgentWorkspaceTests {
         let library = SkillLibrary(root: root.appendingPathComponent("library"))
         let targets = AgentRegistry.skillTargets(home: root.path, environment: [:]).filter { ["claude", "pi"].contains($0.id) }
         let skill = try #require(try await library.create(name: "review", description: "Review").skills.first)
+        let manifest = root.appendingPathComponent("library/skills.json")
+        var legacy = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])
+        var records = try #require(legacy["skills"] as? [[String: Any]])
+        for index in records.indices { records[index].removeValue(forKey: "sourcePath") }
+        legacy["skills"] = records
+        try JSONSerialization.data(withJSONObject: legacy).write(to: manifest)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("library/sources"))
         _ = try await library.apply(library.plan(skill.id, desired: ["claude": .copy, "pi": .copy], targets: targets))
         let oldText = try await library.content(skill.id).text
         _ = try await library.publish(skill.id, expectedRevision: skill.revision, text: oldText + "\nNew version.")
@@ -164,9 +171,9 @@ extension AgentWorkspaceTests {
         model.restrictToAgents(["claude"])
         model.load(); await model.operationTask?.value
         model.preview(); await model.operationTask?.value
-        #expect(model.plan?.items.map { $0.after?.targetID } == ["claude"])
-        model.apply(); await model.operationTask?.value
+        #expect(model.plan?.items.isEmpty == true)
         let snapshot = try await library.load()
+        #expect(snapshot.deployments.first { $0.targetID == "claude" }?.sourcePath != nil)
         #expect(snapshot.deployments.first { $0.targetID == "pi" }?.revision == skill.revision)
         let path = try #require(targets.first { $0.id == "pi" }?.directory)
         #expect(try String(contentsOfFile: path + "/review/SKILL.md", encoding: .utf8) == oldText)

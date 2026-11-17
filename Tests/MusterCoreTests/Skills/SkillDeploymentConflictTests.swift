@@ -101,6 +101,7 @@ import Testing
     @Test func changedCopyReleasePreservesUserEditsAndOtherTargets() async throws {
         let f = Fixture(); defer { f.cleanup() }
         let skill = try #require(try await f.library.create(name: "review", description: "Library").skills.first)
+        try markSkillSourcesAsLegacy(manifest: f.root.appendingPathComponent("library/skills.json"))
         let pi = SkillTarget(id: "pi", name: "Pi", directory: f.root.appendingPathComponent("pi").path)
         _ = try await f.library.apply(f.library.plan(skill.id, desired: [f.target.id: .copy, pi.id: .symlink], targets: [f.target, pi]))
         let file = f.destination.appendingPathComponent("SKILL.md")
