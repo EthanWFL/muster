@@ -232,18 +232,33 @@ struct SettingsRow<Content: View>: View {
 
 // MARK: - 品牌标
 
-/// 面板左上角的品牌标：直接播放 `manta-glide.gif`（20fps，3.2s 一轮）。
-/// 开启「减弱动态效果」时停在首帧；深色模式下用 CIColorInvert 把黑色蝠鲼翻成白色。
+/// 快捷面板每次打开时眨眼一次；其他位置和减弱动态效果模式直接显示定格。
 struct BrandMark: View {
+    var isPanelOpen = false
     @ReducedMotion private var reduceMotion
-    private let theme = Theme.shared
-    var size: CGFloat = 20
+    @State private var pose: NSImage?
 
     var body: some View {
-        MantaPlayer(size: size, animated: !reduceMotion, invert: theme.isDark)
-            .frame(width: size, height: size)
-            .clipped()
+        Image(nsImage: (isPanelOpen && !reduceMotion ? pose : nil) ?? MenuBarIcon.image)
+            .renderingMode(.template)
+            .resizable()
+            .foregroundStyle(T.fg)
+            .frame(width: 24, height: 24)
             .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .onChange(of: reduceMotion) { _, reduced in if reduced { pose = nil } }
+            .task(id: isPanelOpen) {
+                pose = nil
+                guard isPanelOpen, !reduceMotion else { return }
+                for (index, frame) in MenuBarIcon.frames.dropLast().enumerated() {
+                    pose = frame
+                    // 起势留一拍；主线程繁忙时不追赶时钟，以免把可见帧一次跳完。
+                    do { try await Task.sleep(for: .milliseconds(index == 0 ? 140 : 55)) }
+                    catch { return }
+                    guard !Task.isCancelled, pose != nil else { return }
+                }
+                pose = nil
+            }
     }
 }
 

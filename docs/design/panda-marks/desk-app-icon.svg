@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="512" height="512" role="img" aria-label="Muster 桌边熊猫应用图标">
+  <defs><linearGradient id="jade" x2=".8" y2="1"><stop stop-color="#c4e9d9"/><stop offset="1" stop-color="#80bdad"/></linearGradient></defs>
+  <path fill="url(#jade)" d="M64 4C91 4 106 4 116 14S124 40 124 64S126 104 116 114S92 124 64 124S22 124 12 114S4 89 4 64S2 24 12 14S37 4 64 4Z"/>
+  <ellipse cx="64" cy="108" rx="34" ry="3.5" fill="#416b62" opacity=".22"/>
+  <g fill="#232c2e">
+    <path d="M37 80Q29 88 31 103Q32 111 39 107L47 99L45 91L51 102Q55 111 61 107Q65 105 62 96L58 83H71L66 98Q64 107 70 108Q76 109 81 100L85 91L82 100L89 106Q97 113 98 102Q98 89 90 80Z"/>
+    <circle cx="35" cy="31" r="12"/><circle cx="92" cy="31" r="12"/>
+  </g>
+  <path fill="#fffdf4" d="M64 20C84 20 95 30 102 47C107 59 111 72 103 81C96 89 80 90 64 90S32 89 25 81C17 72 21 59 26 47C33 30 44 20 64 20Z"/>
+  <g fill="#232c2e"><ellipse cx="44" cy="57" rx="11.4" ry="16.5" transform="rotate(28 44 57)"/><ellipse cx="84" cy="57" rx="11.4" ry="16.5" transform="rotate(-28 84 57)"/><path d="M59 71Q60 68 64 70Q68 68 69 71Q69 75 64 77Q59 75 59 71Z"/></g>
+  <g fill="#fffdf4"><ellipse cx="47" cy="57" rx="4.8" ry="5.4"/><ellipse cx="81" cy="57" rx="4.8" ry="5.4"/></g>
+  <g fill="#232c2e"><circle cx="48.4" cy="57" r="2.8"/><circle cx="79.6" cy="57" r="2.8"/></g>
+  <ellipse cx="69.3" cy="79" rx="3" ry="4.3" fill="#e67c60" transform="rotate(45 69.3 79)"/>
+</svg>

@@ -79,7 +79,7 @@ struct PanelView: View {
     /// 快速面板顶部：品牌、搜索和管理窗口入口。
     private var header: some View {
         HStack(spacing: T.s2) {
-            BrandMark()
+            BrandMark(isPanelOpen: surface.isVisible)
             Text("Muster")
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(T.fg)

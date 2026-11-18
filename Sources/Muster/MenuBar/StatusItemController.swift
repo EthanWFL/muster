@@ -32,7 +32,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             button.image = MenuBarIcon.image
             button.imagePosition = .imageLeading
-            button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            button.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
             button.setAccessibilityLabel("Muster")
             button.target = self
             button.action = #selector(handleClick)
@@ -75,6 +75,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.performClose(nil)
     }
 
+    func popoverDidShow(_ notification: Notification) {
+        surface.isVisible = true
+    }
+
     func popoverDidClose(_ notification: Notification) {
         surface.isVisible = false
         model.env.setVisible(false, owner: surfaceID)
@@ -98,7 +102,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func showPanel() {
         guard let button = statusItem.button else { return }
-        surface.isVisible = true
         if !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }

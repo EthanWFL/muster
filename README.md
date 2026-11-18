@@ -22,7 +22,7 @@ Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent
 当前安装包支持 **macOS 14 及以上、Apple Silicon（arm64）**，运行时不需要安装 Swift 或开发工具。
 
 1. 在[最新发布页](https://github.com/EthanWFL/muster/releases/latest)下载 DMG，将 `Muster.app` 拖入 `/Applications`。
-2. 启动后点击菜单栏的蝠鲼图标，或按 `⌃⌥A` 打开快捷面板。应用不显示 Dock 图标。
+2. 启动后点击菜单栏的熊猫图标，或按 `⌃⌥A` 打开快捷面板。面板打开时熊猫眨一次眼，开启「减弱动态效果」时保持静止。应用不显示 Dock 图标。
 3. 在“设置 → Agent 管理”选择希望 Muster 处理的 Agent，再从项目、会话或 Agent 页开始使用。
 
 安装包目前采用 ad-hoc 代码签名，尚未经过 Apple 公证。首次打开如被 macOS 阻止，可在“系统设置 → 隐私与安全性”中允许打开。发布页同时提供 SHA-256 校验文件。
