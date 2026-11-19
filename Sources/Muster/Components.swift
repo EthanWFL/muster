@@ -232,11 +232,12 @@ struct SettingsRow<Content: View>: View {
 
 // MARK: - 品牌标
 
-/// 快捷面板每次打开时眨眼一次；其他位置和减弱动态效果模式直接显示定格。
+/// 窗口打开或指针移入时眨眼一次，减弱动态效果时保持静止。
 struct BrandMark: View {
     var isPanelOpen = false
     @ReducedMotion private var reduceMotion
     @State private var pose: NSImage?
+    @State private var hoverReplay = 0
 
     var body: some View {
         Image(nsImage: (isPanelOpen && !reduceMotion ? pose : nil) ?? MenuBarIcon.image)
@@ -245,9 +246,12 @@ struct BrandMark: View {
             .foregroundStyle(T.fg)
             .frame(width: 24, height: 24)
             .accessibilityHidden(true)
-            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside, isPanelOpen, !reduceMotion { hoverReplay += 1 }
+            }
             .onChange(of: reduceMotion) { _, reduced in if reduced { pose = nil } }
-            .task(id: isPanelOpen) {
+            .task(id: isPanelOpen ? hoverReplay : nil) {
                 pose = nil
                 guard isPanelOpen, !reduceMotion else { return }
                 for (index, frame) in MenuBarIcon.frames.dropLast().enumerated() {

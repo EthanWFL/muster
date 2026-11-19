@@ -4,6 +4,28 @@ import MusterCore
 @testable import Muster
 
 @Suite(.serialized) @MainActor struct ManagementWindowControllerTests {
+    @Test func reopeningWindowReplaysTitlebarMark() async throws {
+        let fixture = WindowFixture()
+        let previous = SettingsStore.shared.reduceMotion
+        defer { fixture.cleanup(); SettingsStore.shared.reduceMotion = previous }
+        SettingsStore.shared.reduceMotion = .off
+        for _ in 0..<2 {
+            fixture.controller.open()
+            let view = try #require(fixture.controller.window?.titlebarAccessoryViewControllers.first?.view)
+            var samples = Set<Data>()
+            for _ in 0..<14 {
+                try await Task.sleep(for: .milliseconds(40))
+                view.layoutSubtreeIfNeeded()
+                let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: rep)
+                samples.insert(try #require(rep.representation(using: .png, properties: [:])))
+            }
+            #expect(samples.count >= 3)
+            fixture.controller.close()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     @Test func reopeningPreservesUserFrameAndMinimumSize() async throws {
         let fixture = WindowFixture()
         defer { fixture.cleanup() }

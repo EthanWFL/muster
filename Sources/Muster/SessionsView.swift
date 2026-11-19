@@ -5,6 +5,7 @@ struct SessionsView: View {
     @ObservedObject var model: PanelModel
     @ObservedObject var library: SessionLibraryModel
     var onOpenLibrary: (() -> Void)?
+    @Environment(\.openSessionClient) private var openClient
     private enum Focus: Hashable { case search, list }
     @FocusState private var focus: Focus?
 
@@ -53,11 +54,11 @@ struct SessionsView: View {
                     ForEach(groups) { group in
                         Section {
                             ForEach(group.sessions, id: \.key) { session in
-                                SessionRow(model: model, session: session, showsAgent: model.sessionGrouping == .project,
+                                SessionRow(session: session, showsAgent: model.sessionGrouping == .project,
                                            customTitle: titles[session.key])
                                     .tag(session.key)
                                     .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                                    .onTapGesture(count: 2) { model.openClient(session) }
+                                    .onTapGesture(count: 2) { openClient(session) }
                                     .contextMenu {
                                         if let onOpenLibrary {
                                             Button(L10n.t("Edit session details")) {
@@ -66,7 +67,7 @@ struct SessionsView: View {
                                             }
                                         }
                                         if session.isProcessAlive, let client = session.client {
-                                            Button(L10n.t("Open %@", client.name)) { model.openClient(session) }
+                                            Button(L10n.t("Open %@", client.name)) { openClient(session) }
                                         }
                                     }
                             }
@@ -81,7 +82,7 @@ struct SessionsView: View {
                 .onKeyPress(.return) {
                     guard let session = visibleSessions.first(where: { $0.key == model.selectedSessionKey }) else { return .ignored }
                     guard session.isProcessAlive, session.client != nil else { return .ignored }
-                    model.openClient(session)
+                    openClient(session)
                     return .handled
                 }
                 .accessibilityLabel(L10n.t("Sessions"))
@@ -184,7 +185,6 @@ struct SessionsView: View {
 }
 
 private struct SessionRow: View {
-    @ObservedObject var model: PanelModel
     let session: Session
     let showsAgent: Bool
     let customTitle: String?
@@ -218,7 +218,7 @@ private struct SessionRow: View {
             .help(session.isProcessAlive
                   ? L10n.t("Process is present. Activity does not indicate task completion.")
                   : L10n.t("Transcript only. No unique process association was found."))
-            SessionClientButton(session: session) { model.openClient(session) }
+            SessionClientButton(session: session)
         }
         .frame(minHeight: T.rowDouble)
         .contentShape(Rectangle())

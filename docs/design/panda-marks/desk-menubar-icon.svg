@@ -1,4 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="18" height="18" fill="currentColor" role="img" aria-label="桌边熊猫菜单栏标记">
-  <path fill-rule="evenodd" d="M3 10C0 4 5-1 10 1Q12 2 13 4Q18 2 23 4Q24 1 27 1C32-1 36 5 33 10Q32 12 31 12C34 17 36 22 32 25L31 26Q33 30 32 33Q31 36 28 34L26 32Q24 36 21 35Q19 34 20 29H16Q17 34 15 35Q12 36 10 32L8 34Q5 36 4 33Q3 30 5 26C0 24 0 20 3 14L5 11Z M18 6C12 6 8 9 6 15C3 22 5 25 11 26Q18 28 25 26C31 25 33 22 30 15C28 9 24 6 18 6Z"/>
-  <ellipse cx="11.4" cy="16.3" rx="3.35" ry="5.15" transform="rotate(27 11.4 16.3)"/><ellipse cx="24.6" cy="16.3" rx="3.35" ry="5.15" transform="rotate(-27 24.6 16.3)"/><path d="M15.6 21Q18 19.7 20.4 21Q20.4 23 18 24Q15.6 23 15.6 21Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 15 92 99" width="18" height="18" role="img" aria-label="桌边熊猫菜单栏标记">
+  <defs>
+    <mask id="panda" maskUnits="userSpaceOnUse" x="18" y="15" width="92" height="99">
+      <path fill="white" fill-rule="evenodd" d="M64 69C44 69 38 77 35 85C34.2 90 31 90 30 97C28 104 33 109 40 110Q48 111 54 107Q64 111 74 107Q80 111 88 110C95 109 100 104 98 97C97 90 93.8 90 93 85C90 77 84 69 64 69Z M64 78C55 78 48 85 46 94Q46 104 54 103Q64 107 74 103Q82 104 82 94C80 85 73 78 64 78Z" />
+      <g transform="translate(0)">
+        <path fill="white" d="M44 74Q40 81 44 87Q48 94 55 96Q61 98 62 93Q62 89 56 84Q54 80 53 74Z" />
+        <ellipse cx="40" cy="103" rx="10" ry="8.8" transform="rotate(-27 40 103)" fill="white" />
+      </g>
+      <g transform="translate(128 0) scale(-1 1)">
+        <path fill="white" d="M44 74Q40 81 44 87Q48 94 55 96Q61 98 62 93Q62 89 56 84Q54 80 53 74Z" />
+        <ellipse cx="40" cy="103" rx="10" ry="8.8" transform="rotate(-27 40 103)" fill="white" />
+      </g>
+      <g transform="translate(64 18) scale(.9) translate(-64 -19)">
+        <g fill="white">
+          <circle cx="35" cy="31" r="12" />
+          <circle cx="92" cy="31" r="12" />
+        </g>
+        <path fill="black" d="M64 20C84 20 95 30 102 47C107 59 111 72 103 81C96 89 80 90 64 90S32 89 25 81C17 72 21 59 26 47C33 30 44 20 64 20Z" stroke="white" stroke-width="5.5" />
+        <g fill="white">
+          <ellipse cx="44" cy="57" rx="11.4" ry="16.5" transform="rotate(28 44 57)" class="blink-eye" />
+          <ellipse cx="84" cy="57" rx="11.4" ry="16.5" transform="rotate(-28 84 57)" class="blink-eye" />
+          <path d="M59 71Q60 68 64 70Q68 68 69 71Q69 75 64 77Q59 75 59 71Z" />
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <rect x="18" y="15" width="92" height="99" fill="currentColor" mask="url(#panda)" />
 </svg>

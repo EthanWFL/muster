@@ -65,12 +65,6 @@ struct PanelView: View {
             .clipped()
             .id(settings.language.rawValue + "-" + String(settings.comfortableLayout))
             .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: isShowingSettings)
-            if let notice = model.notice {
-                Text(notice)
-                    .font(T.small).foregroundStyle(T.muted)
-                    .padding(.horizontal, T.s4).padding(.bottom, T.s2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
             Hairline()
             footer
         }
@@ -108,8 +102,10 @@ struct PanelView: View {
             } else if model.tab == .sessions {
                 if presentation == .window {
                     SessionLibraryView(model: model, library: model.library)
+                        .modifier(SessionClientActions(model: model))
                 } else {
                     SessionsView(model: model, library: model.library, onOpenLibrary: onOpenWindow)
+                        .modifier(SessionClientActions(model: model))
                 }
             } else {
                 ScrollView(.vertical) {

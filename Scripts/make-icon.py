@@ -37,7 +37,10 @@ def main():
     strip = Image.new("RGBA", (side * len(heights), side))
     for i, height in enumerate(heights):
         svg = ET.fromstring(source)
-        for eye in svg.findall("{http://www.w3.org/2000/svg}ellipse"):
+        eyes = svg.findall(".//{http://www.w3.org/2000/svg}ellipse[@class='blink-eye']")
+        if len(eyes) != 2:
+            raise ValueError("Expected two blink-eye ellipses in the panda template")
+        for eye in eyes:
             cy = eye.attrib["cy"]
             eye.set("transform", f"{eye.attrib['transform']} translate(0 {cy}) scale(1 {height}) translate(0 -{cy})")
         strip.paste(render(ET.tostring(svg), side), (i * side, 0))

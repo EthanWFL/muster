@@ -7,7 +7,6 @@ import Combine
 @MainActor
 final class PanelModel: ObservableObject {
     @Published private(set) var sessions: [Session] = []
-    @Published private(set) var notice: String?
     @Published private(set) var isRefreshingSessions = false
     @Published var sessionSearch = ""
     @Published var sessionFilter: SessionActivityFilter = .all
@@ -18,7 +17,6 @@ final class PanelModel: ObservableObject {
     @Published var selectedSessionKey: String?
     @Published private(set) var searchFocusRequest = 0
     @Published private(set) var lastSessionRefresh: Date?
-    @Published private(set) var resumingSessionKey: String?
     private var allScannedSessions: [Session] = []
     private var scopeObservation: AnyCancellable?
     private var lastAppliedAgentIDs: Set<String>?
@@ -38,7 +36,6 @@ final class PanelModel: ObservableObject {
     private var scanTask: Task<Void, Never>?
     private var activityMonitor = SessionActivityMonitor()
     private let sessionStore = SessionStore()
-    private let terminalJumper = TerminalJumper()
     private let notifier = NotificationService()
     private let scanners = AgentRegistry.transcriptScanners()
     private var diskTimer: Timer?
@@ -192,57 +189,9 @@ final class PanelModel: ObservableObject {
             $0.bundleURL?.resolvingSymlinksInPath() == path
         }) else { return false }
         return app.activate(options: [])
-    }) {
-        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, let client = session.client else { return }
-        notice = activate(client) ? nil : L10n.t("Could not activate %@. The client may have closed.", client.name)
-    }
-
-    func jumpToTerminal(_ session: Session) {
-        guard agentSelection.manages(session.agent.rawValue) else { return }
-        let jumper = terminalJumper
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let result = jumper.jump(to: session)
-            await MainActor.run { [weak self] in self?.applyJumpResult(result) }
-        }
-    }
-
-    private func applyJumpResult(_ result: TerminalJumpResult) {
-        switch result {
-        case .focused(let app, let tty):
-            notice = L10n.t("Focused %@ · %@", app, tty)
-        case .copied(let command):
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(command, forType: .string)
-            notice = L10n.t("Terminal window not found · %@ copied", command)
-        }
-    }
-
-    func copyResume(_ session: Session) {
-        guard agentSelection.manages(session.agent.rawValue) else { return }
-        guard let command = session.resumeCommand else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
-        notice = L10n.t("Resume command copied · %@", command)
-    }
-
-    func continueSession(_ session: Session) {
-        guard agentSelection.manages(session.agent.rawValue) else { return }
-        if session.isProcessAlive { jumpToTerminal(session); return }
-        guard resumingSessionKey == nil, session.resumeCommand != nil else { return }
-        resumingSessionKey = session.key
-        Task {
-            defer { resumingSessionKey = nil }
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try SessionResumer().resume(session) }
-            }.value
-            switch result {
-            case .success: notice = L10n.t("Resume command sent to a new Terminal window.")
-            case .failure(let error):
-                copyResume(session)
-                notice = L10n.t(error.localizedDescription)
-            }
-        }
+    }) -> String? {
+        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, let client = session.client else { return nil }
+        return activate(client) ? nil : L10n.t("Could not activate %@. The client may have closed.", client.name)
     }
 
     func refreshSessions() {

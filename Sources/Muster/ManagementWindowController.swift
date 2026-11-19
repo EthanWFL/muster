@@ -39,6 +39,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
     init(model: PanelModel) {
         self.model = model
         super.init(window: nil)
+        surface.isVisible = false
     }
 
     required init?(coder: NSCoder) { nil }
@@ -67,7 +68,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
             toolbar.allowsUserCustomization = false
             window.toolbar = toolbar
             // Accessories keep the shared SwiftUI controls out of native toolbar capsules.
-            window.addTitlebarAccessoryViewController(accessory(WindowToolbarBrand(), edge: .left,
+            window.addTitlebarAccessoryViewController(accessory(WindowToolbarBrand(surface: surface), edge: .left,
                                                                 size: NSSize(width: 100, height: 28)))
             window.addTitlebarAccessoryViewController(accessory(
                 PanelHeaderActions(model: model, presentation: .window).padding(.trailing, T.s3), edge: .right,
@@ -81,7 +82,6 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
             self.window = window
         }
         guard let window else { return }
-        surface.isVisible = true
         // AppKit adopts a new content controller's fitting size. Preserve the user's
         // frame across remounts and give SwiftUI the same minimum bounds.
         var frame = window.frame
@@ -106,6 +106,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        surface.isVisible = true
     }
 
     private func accessory<Content: View>(_ content: Content, edge: NSLayoutConstraint.Attribute,
@@ -140,9 +141,11 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
 }
 
 private struct WindowToolbarBrand: View {
+    @ObservedObject var surface: PanelSurfaceState
+
     var body: some View {
         HStack(spacing: 8) {
-            BrandMark()
+            BrandMark(isPanelOpen: surface.isVisible)
             Text("Muster").font(.system(size: 13, weight: .semibold))
         }
         .frame(width: 100, height: 28, alignment: .leading)

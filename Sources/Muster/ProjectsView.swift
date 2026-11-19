@@ -21,6 +21,8 @@ struct ProjectsView: View {
                     Hairline(vertical: true)
                     if let project = projects.selected {
                         detail(project)
+                            .modifier(SessionClientActions(model: model))
+                            .id(project.id)
                     } else {
                         emptyState("Your projects, in one place", symbol: "folder",
                                    message: "Add a folder or import sessions to get started.")
@@ -239,6 +241,7 @@ struct ProjectsView: View {
                             Spacer(minLength: 0)
                             Button(L10n.t("View notes")) { model.openLibrarySession(entry) }
                                 .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(library.isSaving)
+                            SessionClientButton(session: entry.session)
                         }.padding(T.s3)
                         if entry.id != project.pending.last?.id { Hairline().padding(.horizontal, T.s3) }
                     }
@@ -275,12 +278,7 @@ struct ProjectsView: View {
                                     }.font(T.small).foregroundStyle(T.muted)
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(InteractivePlainButtonStyle(pressedScale: 1)).disabled(library.isSaving)
-                            if entry.session.isProcessAlive || entry.session.resumeCommand != nil {
-                                Button { model.continueSession(entry.session) } label: {
-                                    Label(L10n.t(entry.session.isProcessAlive ? "Focus terminal" : "Continue"), systemImage: "terminal")
-                                }
-                                .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(model.resumingSessionKey != nil)
-                            }
+                            SessionClientButton(session: entry.session)
                         }.padding(T.s3)
                         if entry.id != entries.last?.id { Hairline().padding(.horizontal, T.s3) }
                     }

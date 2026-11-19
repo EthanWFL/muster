@@ -1,6 +1,6 @@
 # Muster
 
-Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent 的会话、共享规则、技能和模型配置。经常同时使用 Claude Code、Codex、Pi 等工具时，可以在一个面板里找到正在进行的工作、继续旧会话，或修改常用设置。
+Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent 的会话、共享规则、技能和模型配置。经常同时使用 Claude Code、Codex、Pi 等工具时，可以在一个面板里切回正在使用的客户端、查看历史会话，或修改常用设置。
 
 [下载最新版](https://github.com/EthanWFL/muster/releases/latest) · [1.2.0 更新记录](docs/releases/1.2.0.md) · [全部版本](https://github.com/EthanWFL/muster/releases) · [详细使用说明](docs/usage.md)
 
@@ -15,7 +15,7 @@ Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent
 | 清理 | 预览端口、孤儿进程及失效 worktree 的清理计划，确认后执行 |
 | 偏好设置 | 选择需要管理的 Agent，设置外观、语言、通知和减弱动态效果 |
 
-会话识别支持 Claude Code、Codex、Pi、DeepSeek Harness、Gemini CLI、Cursor、OpenCode。各 Agent 的能力不同：历史记录与续接主要支持 Claude Code、Codex、Pi，原生模型表单支持 Codex、Pi。技能库由 Muster 独立实现，不依赖 Magpie。
+会话识别支持 Claude Code、Codex、Pi、DeepSeek Harness、Gemini CLI、Cursor、OpenCode。各 Agent 的能力不同：历史记录主要支持 Claude Code、Codex、Pi，原生模型表单支持 Codex、Pi。技能库由 Muster 独立实现，不依赖 Magpie。
 
 ## 安装与快速开始
 

@@ -2,6 +2,7 @@ import MusterCore
 import SwiftUI
 
 struct SessionLibraryView: View {
+    @Environment(\.openSessionClient) private var openClient
     @ObservedObject var model: PanelModel
     @ObservedObject var library: SessionLibraryModel
     @State private var showsCategories = false
@@ -34,7 +35,7 @@ struct SessionLibraryView: View {
                     }
                     HSplitView {
                         sessionList.frame(minWidth: 260, idealWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
-                        SessionLibraryDetail(model: model, library: library)
+                        SessionLibraryDetail(library: library)
                             .frame(minWidth: 320, idealWidth: 370, maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -179,7 +180,7 @@ struct SessionLibraryView: View {
             } else {
                 List(selection: Binding<String?>(get: { library.selectedID }, set: { if let id = $0 { library.select(id) } })) {
                     ForEach(entries) { entry in
-                        SessionLibraryRow(entry: entry, openClient: { model.openClient(entry.session) })
+                        SessionLibraryRow(entry: entry)
                             .tag(entry.id)
                             .listRowInsets(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
                             .contextMenu {
@@ -195,7 +196,7 @@ struct SessionLibraryView: View {
                                 }.disabled(entry.stored == nil || library.isSaving || (library.selectedID == entry.id && library.dirty))
                                 if entry.session.isProcessAlive, let client = entry.session.client {
                                     Divider()
-                                    Button(L10n.t("Open %@", client.name)) { model.openClient(entry.session) }
+                                    Button(L10n.t("Open %@", client.name)) { openClient(entry.session) }
                                 }
                             }
                     }
@@ -218,7 +219,6 @@ struct SessionLibraryView: View {
 
 private struct SessionLibraryRow: View {
     let entry: LibrarySession
-    let openClient: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -228,7 +228,7 @@ private struct SessionLibraryRow: View {
                 if entry.annotation.needsAttention {
                     Image(systemName: "flag.fill").foregroundStyle(T.amber).help(L10n.t("Needs attention"))
                 }
-                SessionClientButton(session: entry.session, action: openClient)
+                SessionClientButton(session: entry.session)
             }
             Text(entry.session.cwd.isEmpty ? L10n.t("Unknown project") : (entry.session.cwd as NSString).abbreviatingWithTildeInPath)
                 .font(T.monoMicro).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -246,7 +246,6 @@ private struct SessionLibraryRow: View {
 }
 
 private struct SessionLibraryDetail: View {
-    @ObservedObject var model: PanelModel
     @ObservedObject var library: SessionLibraryModel
     @FocusState private var titleFocused: Bool
 
@@ -301,7 +300,7 @@ private struct SessionLibraryDetail: View {
             HStack(alignment: .top) {
                 Text(entry.displayTitle).font(.system(size: 19, weight: .semibold)).textSelection(.enabled)
                 Spacer(minLength: T.s2)
-                SessionClientButton(session: entry.session) { model.openClient(entry.session) }
+                SessionClientButton(session: entry.session)
             }
             Text(entry.session.agent.displayName + " · " + L10n.t(entry.session.isProcessAlive ? "Process present" : "No linked running process"))
                 .font(T.small).foregroundStyle(T.muted)
