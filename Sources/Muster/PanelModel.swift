@@ -188,9 +188,25 @@ final class PanelModel: ObservableObject {
         guard let app = NSWorkspace.shared.runningApplications.first(where: {
             $0.bundleURL?.resolvingSymlinksInPath() == path
         }) else { return false }
+        if let pane = client.paneURL, app.bundleIdentifier == "dev.warp.Warp-Stable",
+           NSWorkspace.shared.urlForApplication(toOpen: pane)?.resolvingSymlinksInPath() == path,
+           NSWorkspace.shared.open(pane) { return true }
         return app.activate(options: [])
     }) -> String? {
-        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, let client = session.client else { return nil }
+        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, var client = session.client else { return nil }
+        if client.paneURL != nil {
+            let table = LibprocProcessTable()
+            guard let pid = session.pid, let start = session.pidStartTime,
+                  let process = table.record(for: pid), process.startTime == start else {
+                return L10n.t("Could not activate %@. The client may have closed.", client.name)
+            }
+            // The shell or its registration can change between the scan and the click.
+            guard let current = SessionClient.detect(for: process, record: table.record(for:)),
+                  current.bundlePath == client.bundlePath else {
+                return L10n.t("Could not activate %@. The client may have closed.", client.name)
+            }
+            client = current
+        }
         return activate(client) ? nil : L10n.t("Could not activate %@. The client may have closed.", client.name)
     }
 

@@ -4,6 +4,7 @@ import Foundation
 public struct SessionClient: Equatable, Sendable {
     public let name: String
     public let bundlePath: String
+    public private(set) var paneURL: URL?
 
     public init(name: String, bundlePath: String) {
         self.name = name
@@ -19,7 +20,8 @@ public struct SessionClient: Equatable, Sendable {
         "Ghostty.app": "Ghostty", "Alacritty.app": "Alacritty", "kitty.app": "Kitty", "WezTerm.app": "WezTerm"
     ]
 
-    public static func detect(for process: ProcessRecord, record: (Int32) -> ProcessRecord?) -> SessionClient? {
+    public static func detect(for process: ProcessRecord, warpPaneDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Muster/warp-panes"), record: (Int32) -> ProcessRecord?) -> SessionClient? {
+        var shells: [ProcessIdentity] = []
         var child = process
         var seen: Set<Int32> = [process.pid]
         // Start at the parent: a binary shipped inside an app can still be launched from a terminal.
@@ -32,7 +34,21 @@ public struct SessionClient: Equatable, Sendable {
                 let executable = URL(fileURLWithPath: path).lastPathComponent
                 // A detached multiplexer/server's original parent is not the current viewer.
                 if ["tmux", "screen", "sshd"].contains(executable) { return nil }
-                if let client = fromExecutable(path) { return client }
+                if executable == "zsh", let shell = parent.identity { shells.append(shell) }
+                if var client = fromExecutable(path) {
+                    if client.name == "Warp" {
+                        for shell in shells {
+                            let file = warpPaneDirectory.appendingPathComponent("\(shell.pid).\(Int(shell.startTime.timeIntervalSince1970))")
+                            guard let info = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+                                  info.isRegularFile == true, info.isSymbolicLink != true, info.fileSize == 32,
+                                  let value = try? String(contentsOf: file, encoding: .utf8), value.utf8.count == 32,
+                                  value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { continue }
+                            client.paneURL = URL(string: "warp://session/" + value)
+                            break
+                        }
+                    }
+                    return client
+                }
             }
             child = parent
         }

@@ -14,7 +14,17 @@
 **会话（Sessions）**
 扫描本机进程，识别 Claude Code / Codex / Pi / DeepSeek Harness / Gemini CLI / Cursor / OpenCode 七个 CLI，按 Agent 分组。每 15 秒自动刷新，也可手动重扫。Claude Code、Codex、Pi 会结合本地 transcript 元数据显示「最近活跃」或「暂无新活动」；只有进程信息时显示「活动未知」，这些状态都不代表任务完成。
 
-会话行最右侧显示当前运行客户端的小图标，例如 Warp、Terminal、iTerm、VS Code、Cursor、Codex 或 ChatGPT 桌面端，悬浮显示名称。点击 Logo 只激活已运行的客户端，不保证定位到具体标签页。来源沿当前进程的父进程链识别，图标直接读取本机应用包；不把 Agent 可执行文件所在的资源目录当作启动客户端。会话与进程无法唯一关联、父进程不可读、经过 tmux/screen/SSH，或进程已退出时不强行标注。来源不保存到历史记录，标题和目录旁不再重复显示。会话页已移除旧终端定位、终端恢复和复制恢复命令的按钮与菜单入口。
+会话行最右侧显示当前运行客户端的小图标，例如 Warp、Terminal、iTerm、VS Code、Cursor、Codex 或 ChatGPT 桌面端，悬浮显示名称。默认切回已运行的客户端。Warp 稳定版的本地 zsh 面板完成登记后，悬浮提示会变成「回到 Warp 会话」，点击可选中该面板。来源沿当前进程的父进程链识别，图标直接读取本机应用包；不把 Agent 可执行文件所在的资源目录当作启动客户端。会话与进程无法唯一关联、父进程不可读、经过 tmux/screen/SSH，或进程已退出时不强行标注。来源不保存到历史记录，标题和目录旁不再重复显示。会话页已移除旧终端定位、终端恢复和复制恢复命令的按钮与菜单入口。
+
+**在 Warp 中启用精确定位**
+
+将下面一行加入 `~/.zshrc`，新开的 Warp 面板会自动登记。已有面板可在提示符执行同一行。若应用放在其他位置，将 `/Applications/Muster.app` 改为实际路径。
+
+```zsh
+[[ $TERM_PROGRAM == WarpTerminal && -r '/Applications/Muster.app/Contents/Resources/Muster_Muster.bundle/muster-warp.zsh' ]] && source '/Applications/Muster.app/Contents/Resources/Muster_Muster.bundle/muster-warp.zsh'
+```
+
+登记脚本把 Warp 提供的面板标识写入 `~/Library/Caches/Muster/warp-panes/`，文件按 shell PID 和启动时间区分，正常退出时删除。Muster 根据会话的进程祖先匹配面板，同一目录中的多个面板可以分别定位。缺少登记时，Logo 仍可切回 Warp。
 
 菜单栏图标旁只显示运行会话总数，例如 `5`。只统计当前管理范围内可识别且仍关联存活进程的会话，不计历史记录，也不展示活跃比例。悬浮可查看统计说明，随每 15 秒扫描及管理范围变化自动更新。
 
@@ -26,7 +36,7 @@
 
 独立管理窗口的「会话」页提供本地会话库：顶部切换「最近」（24 小时内或仍关联存活进程）和「历史」，按全部、待处理、未分类或自建分类筛选。选中会话后可修改标题、标记待处理、填写备注、关联产物目录，按 `⌘S` 保存。搜索同时覆盖标题、项目路径、Agent、备注、分类和产物路径。菜单栏面板显示自定义标题、待处理总数和会话库入口。
 
-每次启动后首次打开会话库，导入最近 30 天的 Claude Code、Codex、Pi 本地记录；右上角刷新菜单可以导入全部历史，也可取消正在进行的扫描。导入只保存会话元数据，不保存对话正文。没有 transcript 的临时进程仍可查看和打开来源客户端，暂不支持历史整理。历史条目不推断进程仍在运行；需要恢复历史会话时，可使用项目页保留的「继续」操作。
+每次启动后首次打开会话库，导入最近 30 天的 Claude Code、Codex、Pi 本地记录；右上角刷新菜单可以导入全部历史，也可取消正在进行的扫描。导入只保存会话元数据，不保存对话正文。没有 transcript 的临时进程仍可查看和打开来源客户端，暂不支持历史整理。历史条目仅在本次扫描关联到存活进程时提供来源跳转。
 
 标题、分类、备注、待处理标记和产物目录保存在 `~/Library/Application Support/Muster/session-library.json`，退出 Agent 或重启 Muster 后仍保留。整理操作支持撤销最近 50 次更改，导入不会覆盖标注或占用撤销记录。删除分类会将其中会话改为未分类，保留会话和原文件。本阶段标注仅在 Muster 内生效，不同步修改 Claude / Codex 的标题或侧边栏。
 

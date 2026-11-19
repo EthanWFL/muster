@@ -196,7 +196,7 @@ struct SessionLibraryView: View {
                                 }.disabled(entry.stored == nil || library.isSaving || (library.selectedID == entry.id && library.dirty))
                                 if entry.session.isProcessAlive, let client = entry.session.client {
                                     Divider()
-                                    Button(L10n.t("Open %@", client.name)) { openClient(entry.session) }
+                                    Button(client.actionTitle) { openClient(entry.session) }
                                 }
                             }
                     }

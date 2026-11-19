@@ -453,6 +453,7 @@
 "Local imports keep their source folder. Git imports use a stable Muster source. Updates to a source are shared by all its linked Agents." = "本机导入沿用原始源目录；Git 导入使用 Muster 的固定源目录。源更新后所有已连接的 Agent 共用新内容。";
 "Running in %@" = "当前客户端：%@";
 "Open %@" = "打开 %@";
+"Return to Warp pane" = "回到 Warp 会话";
 "Could not activate %@. The client may have closed." = "无法激活 %@，客户端可能已关闭。";
 "Visible from these locations" = "当前可读取的来源";
 "Click to undo this Muster deployment. Other readers of its shared directory may also be affected." = "点击撤销 Muster 为此 Agent 创建的部署；读取该共享目录的其他 Agent 状态也会更新。";

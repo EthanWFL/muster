@@ -64,7 +64,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private func updateSessionCounts(_ sessions: [Session]) {
         let counts = SessionActivityCounts(sessions: sessions)
         let summary = L10n.t("%d running sessions", counts.total)
-        statusItem.button?.title = " \(counts.total)"
+        statusItem.button?.title = "\(counts.total)"
         statusItem.button?.toolTip = summary + "\n" + L10n.t("Running sessions of managed Agents only; history is excluded.")
         statusItem.button?.setAccessibilityLabel("Muster · " + summary)
     }

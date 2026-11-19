@@ -10,6 +10,27 @@ import Testing
                       executablePath: path)
     }
 
+    @Test func warpPanesInSameDirectoryFollowShellIdentity() throws {
+        let tree = try TempTree()
+        let directory = URL(fileURLWithPath: tree.root)
+        let first = String(repeating: "a", count: 32), second = String(repeating: "b", count: 32)
+        let warp = record(10, parent: 1, path: "/Applications/Warp.app/Contents/MacOS/stable", age: 20)
+        func detect(_ pid: Int32, age: TimeInterval = 10) -> SessionClient? {
+            let shell = record(pid, parent: 10, path: "/bin/zsh", age: age)
+            return SessionClient.detect(for: record(42, parent: pid, path: "/usr/bin/pi"), warpPaneDirectory: directory) {
+                $0 == pid ? shell : warp
+            }
+        }
+        let epoch = Int(time.timeIntervalSince1970) - 10
+        for (pid, id) in [(20, first), (21, second)] {
+            try id.write(to: directory.appendingPathComponent("\(pid).\(epoch)"), atomically: true, encoding: .utf8)
+            #expect(detect(Int32(pid))?.paneURL?.absoluteString == "warp://session/" + id)
+        }
+        #expect(detect(20, age: 1)?.paneURL == nil)
+        try "bad/url".write(to: directory.appendingPathComponent("20.\(epoch)"), atomically: true, encoding: .utf8)
+        #expect(detect(20)?.paneURL == nil)
+    }
+
     @Test func shellAncestorIdentifiesWarpInsteadOfTheAgent() {
         let agent = record(42, parent: 20, path: "/usr/bin/pi")
         let parents = [20: record(20, parent: 10, path: "/bin/zsh", age: 10),

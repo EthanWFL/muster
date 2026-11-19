@@ -42,6 +42,12 @@ struct SessionClientActions: ViewModifier {
 }
 
 /// Opens the identified client application, without terminal/session navigation.
+extension SessionClient {
+    @MainActor var actionTitle: String {
+        paneURL == nil ? L10n.t("Open %@", name) : L10n.t("Return to Warp pane")
+    }
+}
+
 struct SessionClientButton: View {
     let session: Session
     @Environment(\.openSessionClient) private var openClient
@@ -54,8 +60,8 @@ struct SessionClientButton: View {
                     .contentShape(Rectangle()).accessibilityHidden(true)
             }
             .buttonStyle(InteractivePlainButtonStyle())
-            .help(L10n.t("Open %@", client.name))
-            .accessibilityLabel(L10n.t("Open %@", client.name))
+            .help(client.actionTitle)
+            .accessibilityLabel(client.actionTitle)
         }
     }
 }

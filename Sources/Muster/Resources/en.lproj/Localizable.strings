@@ -452,6 +452,7 @@
 "Local imports keep their source folder. Git imports use a stable Muster source. Updates to a source are shared by all its linked Agents." = "Local imports keep their source folder. Git imports use a stable Muster source. Updates to a source are shared by all its linked Agents.";
 "Running in %@" = "Running in %@";
 "Open %@" = "Open %@";
+"Return to Warp pane" = "Return to Warp pane";
 "Could not activate %@. The client may have closed." = "Could not activate %@. The client may have closed.";
 "Visible from these locations" = "Visible from these locations";
 "Click to undo this Muster deployment. Other readers of its shared directory may also be affected." = "Click to undo this Muster deployment. Other readers of its shared directory may also be affected.";

@@ -67,7 +67,7 @@ struct SessionsView: View {
                                             }
                                         }
                                         if session.isProcessAlive, let client = session.client {
-                                            Button(L10n.t("Open %@", client.name)) { openClient(session) }
+                                            Button(client.actionTitle) { openClient(session) }
                                         }
                                     }
                             }
