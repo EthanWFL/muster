@@ -139,6 +139,7 @@ struct PanelView: View {
                     .buttonStyle(PillButtonStyle(kind: .quiet))
                     .keyboardShortcut("w")
             }
+            ProjectWheelToggle(wheel: model.projects.wheel)
             Button { NSApplication.shared.terminate(nil) } label: {
                 ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q")
             }

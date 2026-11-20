@@ -67,6 +67,12 @@ final class ProjectsModel: ObservableObject {
         }
     }
 
+    lazy var wheel = ProjectWheelController(projects: self, defaults: defaults)
+
+    func setWheelMember(_ project: WorkspaceProject, _ enabled: Bool) {
+        perform { [store] in try await store.setWheelMember(project.path, enabled) }
+    }
+
     func pin(_ project: WorkspaceProject) {
         perform { [store] in try await store.pin(project.path, !project.isPinned) }
     }

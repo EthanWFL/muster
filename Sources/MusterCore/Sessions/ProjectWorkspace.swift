@@ -5,6 +5,7 @@ public struct ProjectRecord: Codable, Equatable, Sendable, Identifiable {
     public let path: String
     public var name = ""
     public var isPinned = false
+    public var wheelMember: Bool?
     public var isHidden = false
     public let addedAt: Date
     public var id: String { path }
@@ -121,6 +122,10 @@ public actor ProjectStore {
         try update(path) { $0.isPinned = value }
     }
 
+    public func setWheelMember(_ path: String, _ enabled: Bool) throws -> ProjectSnapshot {
+        try update(path) { $0.wheelMember = enabled ? true : nil }
+    }
+
     public func rename(_ path: String, _ name: String) throws -> ProjectSnapshot {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, validName(name) else { throw ProjectStoreError.name }
@@ -128,7 +133,7 @@ public actor ProjectStore {
     }
 
     public func hide(_ path: String) throws -> ProjectSnapshot {
-        try update(path) { $0.isHidden = true }
+        try update(path) { $0.isHidden = true; $0.wheelMember = nil }
     }
 
     private func update(_ path: String, _ change: (inout ProjectRecord) -> Void) throws -> ProjectSnapshot {

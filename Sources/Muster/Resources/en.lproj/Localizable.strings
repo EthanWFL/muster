@@ -22,6 +22,14 @@
 "Folder" = "Folder";
 "Cancel" = "Cancel";
 "Quit" = "Quit";
+"Start wheel" = "Start wheel";
+"Close wheel" = "Close wheel";
+"Project wheel" = "Project wheel";
+"Include in project wheel" = "Include in project wheel";
+"Select projects in Projects" = "Choose projects in Projects";
+"Drag to move. Click the center to change page." = "Drag to move. Click the center to change page.";
+"Project folder unavailable: %@" = "Project folder unavailable: %@";
+"Install Visual Studio Code to open this project." = "Install Visual Studio Code to open this project.";
 "Running" = "Running";
 "Idle" = "Idle";
 "unknown" = "unknown";

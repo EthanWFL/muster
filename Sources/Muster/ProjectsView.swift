@@ -137,7 +137,7 @@ struct ProjectsView: View {
                                  + (project.pending.isEmpty ? "" : " · " + L10n.t("%d pending", project.pending.count)))
                                 .font(T.micro).foregroundStyle(T.muted).lineLimit(1)
                         }
-                        Spacer(minLength: 0)
+                        Spacer(minLength: presentation == .window ? 22 : 0)
                     }
                     .padding(T.s2).frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: T.r)
@@ -154,6 +154,15 @@ struct ProjectsView: View {
                     Divider()
                     Button(L10n.t("Remove from list")) { removing = project }
                 }.disabled(projects.isWorking)
+                .overlay(alignment: .trailing) {
+                    if presentation == .window {
+                        Toggle(L10n.t("Include in project wheel"), isOn: Binding(
+                            get: { project.record?.wheelMember == true },
+                            set: { projects.setWheelMember(project, $0) }))
+                            .toggleStyle(.checkbox).labelsHidden().padding(.trailing, T.s2)
+                            .help(L10n.t("Include in project wheel")).disabled(projects.isWorking)
+                    }
+                }
             }
         }
     }

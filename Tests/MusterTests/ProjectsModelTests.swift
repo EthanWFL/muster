@@ -35,6 +35,72 @@ import MusterCore
         #expect(reopened.selected?.isPinned == true)
     }
 
+    @Test func wheelMembershipSurvivesReloadIndependentlyOfPinning() async throws {
+        let fixture = try ProjectModelFixture()
+        defer { fixture.cleanup() }
+        fixture.model.add(fixture.folder.path)
+        await fixture.model.operationTask?.value
+        fixture.model.setWheelMember(try #require(fixture.model.selected), true)
+        await fixture.model.operationTask?.value
+        let reopened = ProjectsModel(library: fixture.library, store: fixture.store, defaults: fixture.defaults)
+        reopened.load()
+        await reopened.operationTask?.value
+        #expect(reopened.wheel.entries.map(\.id) == [fixture.folder.path])
+        #expect(reopened.selected?.isPinned == false)
+        reopened.remove(try #require(reopened.selected))
+        await reopened.operationTask?.value
+        #expect(reopened.wheel.entries.isEmpty)
+        reopened.add(fixture.folder.path)
+        await reopened.operationTask?.value
+        #expect(reopened.wheel.entries.isEmpty)
+    }
+
+    @Test func wheelNamesWrapAfterSixCharactersAndEllipsizeAfterThirteen() {
+        #expect(WheelArcLabel.lines(for: "short") == ["short"])
+        #expect(WheelArcLabel.lines(for: "muster") == ["muster"])
+        #expect(WheelArcLabel.lines(for: "1234567") == ["123456", "7"])
+        #expect(WheelArcLabel.lines(for: "1234567890123") == ["123456", "7890123"])
+        #expect(WheelArcLabel.lines(for: "一二三四五六七八九十甲乙丙丁") == ["一二三四五六", "七八九十甲乙丙…"])
+        #expect(WheelArcLabel.lines(for: "12345👩🏽‍💻7") == ["12345👩🏽‍💻", "7"])
+    }
+
+    @Test func hitTestMatchesEveryDrawnSectorAwayFromDividers() {
+        let r = ProjectWheelController.diameter / 2
+        let hub = ProjectWheelController.hubSize / 2
+        for count in 1...6 {
+            for index in 0..<count {
+                let shape = WheelSector(index: index, count: count)
+                let bounds = CGRect(x: 0, y: 0, width: 2*r, height: 2*r)
+                for fraction in [-0.49, 0, 0.49] {
+                    let a = shape.angle + fraction * 2 * .pi / Double(count)
+                    for radius in [hub + 1, (hub + r) / 2, r - 1] {
+                        let p = CGPoint(x: r + radius * cos(a), y: r + radius * sin(a))
+                        #expect(shape.path(in: bounds).contains(p))
+                        #expect(WheelSector.index(at: p, count: count) == index)
+                    }
+                }
+            }
+        }
+        #expect(WheelSector.index(at: CGPoint(x: r, y: r), count: 6) == nil)
+        #expect(WheelSector.index(at: .zero, count: 4) == nil)
+        #expect(WheelSector.index(at: CGPoint(x: r, y: 2), count: 0) == nil)
+    }
+
+    @Test func bothWheelSizesStayInsideVisibleScreenAtEdgesAndCorners() {
+        for area in [CGRect(x: 0, y: 60, width: 1440, height: 812),
+                     CGRect(x: -1920, y: -120, width: 1920, height: 1050)] {
+            for x in [area.minX, area.midX, area.maxX] {
+                for y in [area.minY, area.midY, area.maxY] {
+                    for size in [ProjectWheelController.hubSize, ProjectWheelController.diameter] {
+                        let frame = ProjectWheelController.frame(center: CGPoint(x: x, y: y), diameter: size, within: area)
+                        #expect(area.contains(frame))
+                        #expect(frame.size == CGSize(width: size, height: size))
+                    }
+                }
+            }
+        }
+    }
+
     @Test func sessionUpdatesRefreshProjectsWithoutDiscardingTheEditorDraft() async throws {
         let fixture = try ProjectModelFixture()
         defer { fixture.cleanup() }

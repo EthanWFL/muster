@@ -22,6 +22,14 @@
 "Folder" = "目录";
 "Cancel" = "取消";
 "Quit" = "退出";
+"Start wheel" = "启动轮盘";
+"Close wheel" = "关闭轮盘";
+"Project wheel" = "项目轮盘";
+"Include in project wheel" = "加入项目轮盘";
+"Select projects in Projects" = "请在项目页勾选项目";
+"Drag to move. Click the center to change page." = "拖动熊猫可移动轮盘，多页时点击熊猫翻页。";
+"Project folder unavailable: %@" = "项目目录不可用：%@";
+"Install Visual Studio Code to open this project." = "请安装 Visual Studio Code 后再打开项目。";
 "Running" = "运行中";
 "Idle" = "空闲";
 "unknown" = "未知";
