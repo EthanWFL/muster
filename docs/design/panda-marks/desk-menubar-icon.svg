@@ -10,7 +10,7 @@
         <path fill="white" d="M44 74Q40 81 44 87Q48 94 55 96Q61 98 62 93Q62 89 56 84Q54 80 53 74Z" />
         <ellipse cx="40" cy="103" rx="10" ry="8.8" transform="rotate(-27 40 103)" fill="white" />
       </g>
-      <g transform="translate(64 18) scale(.9) translate(-64 -19)">
+      <g id="wheel-head" transform="translate(64 18) scale(.9) translate(-64 -19)">
         <g fill="white">
           <circle cx="35" cy="31" r="12" />
           <circle cx="92" cy="31" r="12" />

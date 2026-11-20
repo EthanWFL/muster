@@ -43,7 +43,7 @@ struct PanelView: View {
 
     private var pageAndFooter: some View {
         VStack(spacing: 0) {
-            if !isShowingSettings, model.agentSelection.state.hasDetected, model.agentSelection.state.managedIDs.isEmpty {
+            if (presentation == .popover || model.managementPage == .workspace), model.agentSelection.state.hasDetected, model.agentSelection.state.managedIDs.isEmpty {
                 HStack {
                     Text(L10n.t("No Agents selected for Muster.")).font(T.small).foregroundStyle(T.muted)
                     Spacer()
@@ -57,6 +57,8 @@ struct PanelView: View {
             Group {
                 if isShowingSettings {
                     SettingsView(store: settings, model: model)
+                } else if presentation == .window && model.managementPage == .wheel {
+                    WheelConfigurationView(projects: model.projects, preferences: model.projects.wheel.preferences)
                 } else {
                     tabs
                 }
@@ -157,7 +159,7 @@ struct PanelView: View {
             model.tab = model.orderedTabs[number - 1]
             return .handled
         }
-        if isShowingSettings, press.key == .escape {
+        if presentation == .window, model.managementPage != .workspace, press.key == .escape {
             model.showsSettings = false
             return .handled
         }
@@ -177,6 +179,7 @@ struct PanelHeaderActions: View {
     var body: some View {
         HStack(spacing: T.s2) {
             iconButton("magnifyingglass", help: searchHelp, shortcut: "f") {
+                if presentation == .window && model.managementPage == .wheel { model.focusSessionSearch(); return }
                 if model.tab == .projects && !isShowingSettings { model.projects.focusSearch() }
                 else if model.tab == .agent && !isShowingSettings {
                     if presentation == .popover {
@@ -203,7 +206,7 @@ struct PanelHeaderActions: View {
     }
 
     private var searchHelp: String {
-        if !isShowingSettings {
+        if presentation == .popover || model.managementPage == .workspace {
             if model.tab == .projects { return L10n.t("Search projects · ⌘F") }
             if model.tab == .agent { return L10n.t("Search skills · ⌘F") }
         }

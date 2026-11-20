@@ -66,7 +66,12 @@ final class PanelModel: ObservableObject {
         return tab
     }
 
-    @Published var showsSettings = false
+    enum ManagementPage { case workspace, settings, wheel }
+    @Published var managementPage: ManagementPage = .workspace
+    var showsSettings: Bool {
+        get { managementPage == .settings }
+        set { managementPage = newValue ? .settings : .workspace }
+    }
     @Published var settingsSection: SettingsSection = .general
     @Published private(set) var settingsScrollRequest = 0
     @Published var tabOrder: [Tab] = PanelModel.storedTabOrder() {

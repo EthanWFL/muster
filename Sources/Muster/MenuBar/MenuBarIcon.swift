@@ -2,8 +2,10 @@ import AppKit
 
 /// 面板打开时熊猫眨一次眼，菜单栏始终使用睁眼的末帧。
 enum MenuBarIcon {
-    static let frames: [NSImage] = {
-        let name = "panda-blink"
+    static let frames = loadStrip("panda-blink")
+    static let wheelLayers = loadStrip("panda-wheel-layers")
+
+    private static func loadStrip(_ name: String) -> [NSImage] {
         let url = AppResources.bundles.compactMap { $0.url(forResource: name, withExtension: "png") }.first
             ?? Bundle.module.url(forResource: name, withExtension: "png")
         guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -16,7 +18,7 @@ enum MenuBarIcon {
             image.isTemplate = true
             return image
         }
-    }()
+    }
 
     static let image = frames.last ?? NSImage(systemSymbolName: "circle", accessibilityDescription: nil)!
 }

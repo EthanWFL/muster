@@ -715,3 +715,24 @@
 "Draft saved, not published" = "Draft saved, not published";
 "Matches the published version" = "Matches the published version";
 "Shared visibility is independent of this deployment switch." = "Shared visibility is independent of this deployment switch.";
+
+/* Desktop wheel */
+"Websites" = "Websites";
+"Clipboard" = "Clipboard";
+"Quick settings" = "Quick settings";
+"Wheel configuration" = "Wheel configuration";
+"Inner ring" = "Inner ring";
+"Wheel projects" = "Wheel projects";
+"Add website" = "Add website";
+"Enter a unique HTTP or HTTPS address (maximum six)." = "Enter a unique HTTP or HTTPS address (maximum six).";
+"Keep the last 10 copied texts in memory" = "Keep the last 10 copied texts in memory";
+"Clear clipboard history" = "Clear clipboard history";
+"Hide wheel" = "Hide wheel";
+"Enable clipboard history…" = "Enable clipboard history…";
+"No copied text yet" = "No copied text yet";
+"Whitespace" = "Whitespace";
+"Install Google Chrome to open websites." = "Install Google Chrome to open websites.";
+"Choose up to six wheel projects." = "Choose up to six wheel projects.";
+"Drag to move the wheel." = "Drag to move the wheel.";
+"Remove website" = "Remove website";
+"First six selected projects appear on the wheel." = "First six selected projects appear on the wheel.";

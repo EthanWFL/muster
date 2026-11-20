@@ -91,6 +91,7 @@ public struct ProjectSnapshot: Sendable {
 public enum ProjectStoreError: String, LocalizedError {
     case corrupt = "The project list could not be read. Its file has been left unchanged."
     case folder = "Choose an existing project folder."
+    case wheelLimit = "Choose up to six wheel projects."
     case name = "Use a project name of 1–80 characters."
     case conflict = "The project list changed. Reload it before trying again."
     public var errorDescription: String? { rawValue }
@@ -173,7 +174,10 @@ public actor ProjectStore {
                   state.records.allSatisfy({ ProjectWorkspace.path($0.path) == $0.path && validName($0.name) })
             else { throw ProjectStoreError.corrupt }
         } catch { throw ProjectStoreError.corrupt }
+        let previousWheelCount = state.records.filter { $0.wheelMember == true }.count
         if try mutation(&state) {
+            let count = state.records.filter { $0.wheelMember == true }.count
+            guard count <= max(6, previousWheelCount) else { throw ProjectStoreError.wheelLimit }
             state.revision += 1
             let temporary = directory.appendingPathComponent(".projects-" + UUID().uuidString)
             defer { try? fm.removeItem(at: temporary) }

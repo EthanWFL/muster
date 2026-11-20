@@ -21,7 +21,7 @@ struct ManagementSidebar: View {
                                               selectionNamespace: selectionAnimation)
                         } else {
                             SidebarRow(title: tab.title, symbol: symbol(tab),
-                                       selected: !model.showsSettings && model.tab == tab,
+                                       selected: model.managementPage == .workspace && model.tab == tab,
                                        shortcutHint: "⌘\(index + 1)",
                                        selectionNamespace: selectionAnimation, selectionID: "workspace") {
                                 model.showsSettings = false
@@ -58,6 +58,9 @@ struct ManagementSidebar: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
+            SidebarRow(title: L10n.t("Wheel configuration"), symbol: "chart.pie",
+                       selected: model.managementPage == .wheel, pinned: true) { model.managementPage = .wheel }
+                .padding(.horizontal, T.s3)
             SidebarRow(title: L10n.t("Settings"), symbol: "gearshape",
                        selected: model.showsSettings, shortcutHint: "⌘,", pinned: true) {
                 model.toggleSettings()
@@ -90,7 +93,7 @@ private struct AgentSidebarGroup: View {
     let selectionNamespace: Namespace.ID
     @State private var expanded = false
     @ReducedMotion private var reduceMotion
-    private var active: Bool { !model.showsSettings && model.tab == .agent }
+    private var active: Bool { model.managementPage == .workspace && model.tab == .agent }
 
     var body: some View {
         VStack(spacing: T.s1) {

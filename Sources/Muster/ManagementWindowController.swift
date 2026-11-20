@@ -134,7 +134,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidDeminiaturize(_ notification: Notification) {
         surface.isVisible = true
-        if model.tab == .environment && !model.showsSettings {
+        if model.tab == .environment && model.managementPage == .workspace {
             model.env.setVisible(true, owner: surfaceID)
         }
     }

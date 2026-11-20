@@ -17,6 +17,25 @@ def render(svg, size):
     return Image.open(io.BytesIO(data)).convert("RGBA")
 
 
+def wheel_layers(source, side):
+    """Body, head silhouette (to cover the shoulders), and head details in the same coordinates."""
+    strip = Image.new("RGBA", (3 * side, side))
+    for i in range(3):
+        svg = ET.fromstring(source)
+        mask = svg.find(".//{http://www.w3.org/2000/svg}mask")
+        head = mask.find("*[@id='wheel-head']")
+        if i == 0:
+            mask.remove(head)
+        else:
+            for child in list(mask):
+                if child is not head:
+                    mask.remove(child)
+            if i == 1:
+                head.find("*[@fill='black']").set("fill", "white")
+        strip.paste(render(ET.tostring(svg), side), (i * side, 0))
+    strip.save(ROOT / "Sources/Muster/Resources/panda-wheel-layers.png")
+
+
 def main():
     canvas = Image.new("RGBA", (1024, 1024))
     tile = render((ART / "desk-app-icon.svg").read_bytes(), 1024)
@@ -34,6 +53,7 @@ def main():
     source = (ART / "desk-menubar-icon.svg").read_bytes()
     heights = (1, .75, .4, .19, .4, .75, 1)
     side = 96
+    wheel_layers(source, side)
     strip = Image.new("RGBA", (side * len(heights), side))
     for i, height in enumerate(heights):
         svg = ET.fromstring(source)

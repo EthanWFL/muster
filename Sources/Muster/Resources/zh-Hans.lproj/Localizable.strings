@@ -716,3 +716,24 @@
 "Draft saved, not published" = "草稿已保存，尚未发布";
 "Matches the published version" = "与已发布版本一致";
 "Shared visibility is independent of this deployment switch." = "此开关只控制部署，不能隐藏共享目录中的技能。";
+
+/* Desktop wheel */
+"Websites" = "网站";
+"Clipboard" = "剪贴板";
+"Quick settings" = "快捷设置";
+"Wheel configuration" = "轮盘配置";
+"Inner ring" = "内圈入口";
+"Wheel projects" = "外圈项目";
+"Add website" = "添加网站";
+"Enter a unique HTTP or HTTPS address (maximum six)." = "请输入未添加过的 HTTP 或 HTTPS 网址，最多六个。";
+"Keep the last 10 copied texts in memory" = "在内存中记录最近复制的 10 条文本";
+"Clear clipboard history" = "清空剪贴板历史";
+"Hide wheel" = "隐藏轮盘";
+"Enable clipboard history…" = "开启剪贴板历史…";
+"No copied text yet" = "暂无复制记录";
+"Whitespace" = "空白文本";
+"Install Google Chrome to open websites." = "请安装 Google Chrome 后再打开网站。";
+"Choose up to six wheel projects." = "轮盘最多可勾选六个项目。";
+"Drag to move the wheel." = "拖动熊猫可移动轮盘。";
+"Remove website" = "移除网站";
+"First six selected projects appear on the wheel." = "轮盘显示前六个项目，请取消多余的勾选。";

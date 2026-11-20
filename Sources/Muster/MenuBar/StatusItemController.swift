@@ -43,6 +43,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessions, _ in self?.updateSessionCounts(sessions) }
 
+        model.projects.wheel.onConfigure = { [weak self] in
+            guard let self else { return }
+            self.closeIfShown()
+            self.model.managementPage = .wheel
+            self.management.open()
+        }
         SettingsCoordinator.shared.onOpenPanel = { [weak self] in
             // The quick panel always shows workspace tabs; keep the window's settings selection.
             self?.showPanel()
