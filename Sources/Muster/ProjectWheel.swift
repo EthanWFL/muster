@@ -325,32 +325,40 @@ struct WheelArcLabel: View {
 
     var body: some View {
         Canvas { context, size in
-            let middle = (size.width + ProjectWheelController.diameter) / 4
-            let direction: CGFloat = sin(angle) > 0.001 ? -1 : 1
-            let lines = Self.lines(for: name)
-            for (row, line) in lines.enumerated() {
-                let radius = lines.count == 1 ? middle : middle + (row == 0 ? -7 : 7)
-                let glyphs = line.map { character in
-                    let glyph = context.resolve(Text(verbatim: String(character)).font(T.small.weight(.medium)).foregroundColor(T.fg))
-                    return (glyph, glyph.measure(in: size).width)
-                }
-                let width = glyphs.reduce(0) { $0 + $1.1 }
-                guard width > 0 else { continue }
-                let available = (radius - 6) * min(.pi, 2 * .pi / Double(count)) - 2
-                let scale = min(1, available / width)
-                var offset = -width * scale / 2
-                for (glyph, width) in glyphs {
-                    let advance = width * scale
-                    let theta = angle + direction * (offset + advance / 2) / radius
-                    var pen = context
-                    pen.translateBy(x: size.width / 2 + radius * cos(theta), y: size.height / 2 + radius * sin(theta))
-                    pen.rotate(by: .radians(theta + direction * .pi / 2))
-                    pen.scaleBy(x: scale, y: 1)
-                    pen.draw(glyph, at: .zero, anchor: .center)
-                    offset += advance
-                }
-            }
+            draw(in: context, size: size)
         }.allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    private func draw(in context: GraphicsContext, size: CGSize) {
+        let middle = (size.width + ProjectWheelController.diameter) / 4
+        let direction: CGFloat = sin(angle) > 0.001 ? -1 : 1
+        let sweep = min(CGFloat.pi, 2 * CGFloat.pi / CGFloat(count))
+        let lines = Self.lines(for: name)
+        for (row, line) in lines.enumerated() {
+            let radius = lines.count == 1 ? middle : middle + (row == 0 ? -7 : 7)
+            let glyphs: [(GraphicsContext.ResolvedText, CGFloat)] = line.map { character in
+                let text = Text(verbatim: String(character)).font(T.small.weight(.medium)).foregroundColor(T.fg)
+                let glyph = context.resolve(text)
+                return (glyph, glyph.measure(in: size).width)
+            }
+            let width = glyphs.reduce(CGFloat.zero) { $0 + $1.1 }
+            guard width > 0 else { continue }
+            let available = (radius - 6) * sweep - 2
+            let scale = min(1, available / width)
+            var offset = -width * scale / 2
+            for (glyph, width) in glyphs {
+                let advance = width * scale
+                let theta = CGFloat(angle) + direction * (offset + advance / 2) / radius
+                let x = size.width / 2 + radius * cos(theta)
+                let y = size.height / 2 + radius * sin(theta)
+                var pen = context
+                pen.translateBy(x: x, y: y)
+                pen.rotate(by: .radians(Double(theta + direction * .pi / 2)))
+                pen.scaleBy(x: scale, y: 1)
+                pen.draw(glyph, at: .zero, anchor: .center)
+                offset += advance
+            }
+        }
     }
 }
 
