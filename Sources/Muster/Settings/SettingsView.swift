@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, agents, notifications, interface, diagnostics, about
+    case general, agents, chat, notifications, interface, diagnostics, about
     var id: Self { self }
     var title: String {
         switch self {
         case .general: return L10n.t("General")
         case .agents: return L10n.t("Agent scope")
+        case .chat: return L10n.t("Chat model")
         case .notifications: return L10n.t("Notifications")
         case .interface: return L10n.t("Interface")
         case .diagnostics: return L10n.t("Diagnostics")
@@ -18,6 +19,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "slider.horizontal.3"
         case .agents: return "terminal"
+        case .chat: return "bubble.left"
         case .notifications: return "bell"
         case .interface: return "rectangle.3.group"
         case .diagnostics: return "waveform.path.ecg"
@@ -88,6 +90,7 @@ struct SettingsView: View {
         switch section {
         case .general: general
         case .agents: AgentSelectionSettingsView(selection: model.agentSelection)
+        case .chat: ChatSettingsView(chat: model.chat, store: store)
         case .notifications: notifications
         case .interface: interface
         case .diagnostics: DiagnosticsView(model: model.diagnostics)

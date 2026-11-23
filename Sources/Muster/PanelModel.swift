@@ -66,7 +66,7 @@ final class PanelModel: ObservableObject {
         return tab
     }
 
-    enum ManagementPage { case workspace, settings, wheel }
+    enum ManagementPage { case workspace, chat, settings, wheel }
     @Published var managementPage: ManagementPage = .workspace
     var showsSettings: Bool {
         get { managementPage == .settings }
@@ -115,6 +115,7 @@ final class PanelModel: ObservableObject {
     let instructions: InstructionsModel
     let configuration: ConfigurationModel
     let diagnostics = DiagnosticsModel()
+    let chat = ChatModel()
     let library: SessionLibraryModel
     let projects: ProjectsModel
     let agentWorkspace: AgentWorkspaceModel
@@ -137,6 +138,7 @@ final class PanelModel: ObservableObject {
             guard let self else { return }
             self.objectWillChange.send()
             guard self.lastAppliedAgentIDs != state.managedIDs else { return }
+            if self.lastAppliedAgentIDs != nil { self.chat.newConversation() }
             self.lastAppliedAgentIDs = state.managedIDs
             self.applyAgentScope(state.managedIDs)
         }
@@ -183,6 +185,7 @@ final class PanelModel: ObservableObject {
         diskTimer?.invalidate()
         scanTask?.cancel()
         library.cancelImport()
+        chat.stop()
         agentWorkspace.skills.cancel()
         env.stop()
     }

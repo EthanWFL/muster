@@ -1,4 +1,5 @@
 import Foundation
+import MusterCore
 import ServiceManagement
 
 @MainActor
@@ -56,6 +57,10 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(feishuWebhook, forKey: Self.feishuKey) }
     }
 
+    @Published var chatModelID: String {
+        didSet { defaults.set(chatModelID, forKey: Self.chatModelKey) }
+    }
+
     @Published private(set) var loginItemError: String?
     @Published var hotKeyError: String?
 
@@ -65,6 +70,7 @@ final class SettingsStore: ObservableObject {
     private static let notificationsKey = "MusterNotificationsEnabled"
     private static let feishuKey = "MusterFeishuWebhook"
     private static let managedAgentsKey = "MusterManagedAgentIDs"
+    private static let chatModelKey = "MusterChatModelID"
     private let defaults: UserDefaults
     private var applyingLoginStatus = false
 
@@ -79,6 +85,7 @@ final class SettingsStore: ObservableObject {
         notificationsEnabled = defaults.object(forKey: Self.notificationsKey) as? Bool ?? true
         comfortableLayout = defaults.bool(forKey: "MusterComfortableLayout")
         feishuWebhook = defaults.string(forKey: Self.feishuKey) ?? ""
+        chatModelID = defaults.string(forKey: Self.chatModelKey) ?? OpenAIResponsesClient.defaultModel
     }
 
     var appVersion: String {

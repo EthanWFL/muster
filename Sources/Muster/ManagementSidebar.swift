@@ -29,6 +29,13 @@ struct ManagementSidebar: View {
                             }
                             .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
                         }
+                        if tab == .sessions {
+                            SidebarRow(title: L10n.t("Chat"), symbol: "bubble.left",
+                                       selected: model.managementPage == .chat,
+                                       selectionNamespace: selectionAnimation, selectionID: "workspace") {
+                                model.managementPage = .chat
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, T.s3).padding(.top, T.s4)

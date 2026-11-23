@@ -57,6 +57,8 @@ struct PanelView: View {
             Group {
                 if isShowingSettings {
                     SettingsView(store: settings, model: model)
+                } else if presentation == .window && model.managementPage == .chat {
+                    ChatView(chat: model.chat, panel: model, settings: settings)
                 } else if presentation == .window && model.managementPage == .wheel {
                     WheelConfigurationView(projects: model.projects, preferences: model.projects.wheel.preferences)
                 } else {
@@ -179,7 +181,10 @@ struct PanelHeaderActions: View {
     var body: some View {
         HStack(spacing: T.s2) {
             iconButton("magnifyingglass", help: searchHelp, shortcut: "f") {
-                if presentation == .window && model.managementPage == .wheel { model.focusSessionSearch(); return }
+                if presentation == .window && (model.managementPage == .wheel || model.managementPage == .chat) {
+                    model.focusSessionSearch()
+                    return
+                }
                 if model.tab == .projects && !isShowingSettings { model.projects.focusSearch() }
                 else if model.tab == .agent && !isShowingSettings {
                     if presentation == .popover {
