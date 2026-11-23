@@ -30,6 +30,7 @@ import Testing
         defer { window.orderOut(nil) }
         func pixels() throws -> Data {
             host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw CocoaError(.coderInvalidValue) }
             host.cacheDisplay(in: host.bounds, to: rep)
             guard let png = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.coderInvalidValue) }
@@ -39,13 +40,16 @@ import Testing
         let settled = try pixels()
         for _ in 0..<2 {
             surface.isVisible = true
-            var samples = Set<Data>()
-            for _ in 0..<8 {
-                try await Task.sleep(for: .milliseconds(100))
-                samples.insert(try pixels())
+            var animatedFrames = Set<Data>()
+            let deadline = ContinuousClock.now + .milliseconds(850)
+            // The short poses last 55 ms. Sample more often so CI does not skip them.
+            while animatedFrames.count < 2 && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+                let frame = try pixels()
+                if frame != settled { animatedFrames.insert(frame) }
             }
-            #expect(samples.count >= 3)
-            try await Task.sleep(for: .milliseconds(200))
+            #expect(animatedFrames.count >= 2)
+            try await Task.sleep(until: deadline + .milliseconds(200), clock: .continuous)
             #expect(try pixels() == settled)
             surface.isVisible = false
             try await Task.sleep(for: .milliseconds(80))
