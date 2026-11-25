@@ -43,31 +43,31 @@ struct ManagementSidebar: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: .infinity, alignment: .top)
 
-            if model.showsSettings {
-                Hairline().padding(.bottom, T.s3)
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(SettingsSection.allCases) { section in
-                            SidebarRow(title: section.title, symbol: section.symbol,
-                                       selected: model.settingsSection == section, compact: true,
-                                       selectionNamespace: selectionAnimation, selectionID: "settings-anchor") {
-                                model.showSettings(section)
-                            }
+            if model.managementPage == .wheel {
+                anchorMenu(count: WheelSettingsSection.allCases.count) {
+                    ForEach(WheelSettingsSection.allCases, id: \.self) { section in
+                        anchor(section.title, section.symbol, selected: model.wheelSection == section) {
+                            model.showWheelSection(section)
                         }
                     }
-                    .padding(.leading, T.s2)
-                    .overlay(alignment: .leading) { Rectangle().fill(T.line).frame(width: 1) }
-                    .padding(.leading, 24).padding(.trailing, T.s3)
                 }
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(height: CGFloat(SettingsSection.allCases.count) * (T.rowSingle + 2) + 8)
-                .padding(.bottom, T.s3)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            SidebarRow(title: L10n.t("Wheel configuration"), symbol: "chart.pie",
-                       selected: model.managementPage == .wheel, pinned: true) { model.managementPage = .wheel }
-                .padding(.horizontal, T.s3)
+            SidebarRow(title: L10n.t("Wheel configuration"), symbol: ProjectWheelToggle.symbol,
+                       selected: model.managementPage == .wheel, pinned: true) {
+                model.managementPage = model.managementPage == .wheel ? .workspace : .wheel
+            }
+            .padding(.horizontal, T.s3)
+
+            if model.showsSettings {
+                anchorMenu(count: SettingsSection.allCases.count) {
+                    ForEach(SettingsSection.allCases) { section in
+                        anchor(section.title, section.symbol, selected: model.settingsSection == section) {
+                            model.showSettings(section)
+                        }
+                    }
+                }
+            }
             SidebarRow(title: L10n.t("Settings"), symbol: "gearshape",
                        selected: model.showsSettings, shortcutHint: "⌘,", pinned: true) {
                 model.toggleSettings()
@@ -78,9 +78,31 @@ struct ManagementSidebar: View {
         .frame(width: 170)
         .frame(maxHeight: .infinity)
         .background(T.bg)
-        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.showsSettings)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.managementPage)
+        .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.wheelSection)
         .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.tab)
         .animation(reduceMotion ? nil : InteractionMotion.selection, value: model.settingsSection)
+    }
+
+    private func anchorMenu<Rows: View>(count: Int, @ViewBuilder rows: () -> Rows) -> some View {
+        VStack(spacing: 0) {
+            Hairline().padding(.bottom, T.s3)
+            ScrollView {
+                VStack(spacing: 2, content: rows)
+                    .padding(.leading, T.s2)
+                    .overlay(alignment: .leading) { Rectangle().fill(T.line).frame(width: 1) }
+                    .padding(.leading, 24).padding(.trailing, T.s3)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: CGFloat(count) * (T.rowSingle + 2) + 8)
+            .padding(.bottom, T.s3)
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func anchor(_ title: String, _ symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        SidebarRow(title: title, symbol: symbol, selected: selected, compact: true,
+                   selectionNamespace: selectionAnimation, selectionID: "settings-anchor", action: action)
     }
 
     private func symbol(_ tab: PanelModel.Tab) -> String {

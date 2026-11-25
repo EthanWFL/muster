@@ -120,55 +120,115 @@ enum WheelModule: String, CaseIterable, Identifiable {
     }
 }
 
+enum WheelSettingsSection: CaseIterable {
+    case inner, projects, websites, clipboard
+
+    var title: String {
+        switch self {
+        case .inner: L10n.t("Visible entries")
+        case .projects: L10n.t("Quick projects")
+        case .websites: L10n.t("Favorite websites")
+        case .clipboard: L10n.t("Clipboard history")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .inner: ProjectWheelToggle.symbol
+        case .projects: WheelModule.projects.symbol
+        case .websites: WheelModule.websites.symbol
+        case .clipboard: WheelModule.clipboard.symbol
+        }
+    }
+}
+
 struct WheelConfigurationView: View {
     @ObservedObject var projects: ProjectsModel
     @ObservedObject var preferences: WheelPreferences
+    @Binding var section: WheelSettingsSection
+    let scrollRequest: Int
     @State private var address = ""
     @State private var invalidAddress = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: T.s4) {
-                Text(L10n.t("Wheel configuration")).font(.title2.weight(.semibold))
-                Text(L10n.t("Inner ring")).font(T.section)
-                HStack {
-                    ForEach(WheelModule.allCases) { module in
-                        Toggle(isOn: Binding(get: { preferences.modules.contains(module) }, set: { _ in preferences.toggle(module) })) {
-                            Label(module.title, systemImage: module.symbol)
-                        }.toggleStyle(.checkbox)
+        AnchoredSettingsScroll(sections: WheelSettingsSection.allCases, selection: $section, scrollRequest: scrollRequest) { section in
+            VStack(alignment: .leading, spacing: T.s2) {
+                SectionTitle(text: section.title + countSuffix(for: section))
+                if section == .inner {
+                    Text(L10n.t("Choose which entries appear in the inner ring.")).font(T.small).foregroundStyle(T.muted)
+                } else if section == .projects {
+                    Text(L10n.t("Choose up to six projects to open from the project menu.")).font(T.small).foregroundStyle(T.muted)
+                }
+                Card {
+                    switch section {
+                    case .inner:
+                        ForEach(WheelModule.allCases) { module in
+                            if module != WheelModule.allCases.first { Hairline() }
+                            SettingsRow(label: module.title) {
+                                MiniSwitch(isOn: Binding(get: { preferences.modules.contains(module) },
+                                                         set: { _ in preferences.toggle(module) }), label: module.title)
+                            }
+                        }
+                    case .projects: projectRows
+                    case .websites: websiteRows
+                    case .clipboard:
+                        let label = L10n.t("Keep the last 10 copied texts in memory")
+                        SettingsRow(label: label) {
+                            MiniSwitch(isOn: Binding(get: { preferences.recording }, set: preferences.setRecording), label: label)
+                        }
+                        Hairline()
+                        Button(L10n.t("Clear clipboard history")) { preferences.clear() }
+                            .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(preferences.clips.isEmpty)
+                            .frame(maxWidth: .infinity, alignment: .trailing).padding(T.s2)
                     }
                 }
-                Hairline()
-                Text(L10n.t("Wheel projects") + "  \(projects.projects.filter { $0.record?.wheelMember == true }.count)/6").font(T.section)
-                if projects.projects.isEmpty { Text(L10n.t("Select projects in Projects")).foregroundStyle(T.muted) }
-                if projects.projects.filter({ $0.record?.wheelMember == true }).count > 6 {
-                    Text(L10n.t("First six selected projects appear on the wheel.")).foregroundStyle(T.muted)
-                }
-                ForEach(projects.projects) { project in
-                    Toggle(isOn: Binding(get: { project.record?.wheelMember == true }, set: { projects.setWheelMember(project, $0) })) {
-                        Text(project.name).help(project.path)
-                    }.toggleStyle(.checkbox).disabled(projects.isWorking)
-                }
-                if let error = projects.errorMessage { Text(error).foregroundStyle(T.red) }
-                Hairline()
-                Text(L10n.t("Websites") + "  \(preferences.websites.count)/6").font(T.section)
-                ForEach(preferences.websites, id: \.self) { url in
-                    HStack {
-                        Text(url.absoluteString).lineLimit(1).truncationMode(.middle)
-                        Spacer()
-                        IconButton(symbol: "minus.circle", label: L10n.t("Remove website")) { preferences.removeWebsite(url) }
-                    }
-                }
-                HStack {
-                    TextField("https://example.com", text: $address).onSubmit(addSite)
-                    Button(L10n.t("Add website"), action: addSite).disabled(address.isEmpty || preferences.websites.count >= 6)
-                }
-                if invalidAddress { Text(L10n.t("Enter a unique HTTP or HTTPS address (maximum six).")).foregroundStyle(T.red) }
-                Hairline()
-                Toggle(L10n.t("Keep the last 10 copied texts in memory"), isOn: Binding(get: { preferences.recording }, set: preferences.setRecording))
-                Button(L10n.t("Clear clipboard history")) { preferences.clear() }.disabled(preferences.clips.isEmpty)
-            }.font(T.body).padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }.onAppear { projects.load() }
+    }
+
+    private func countSuffix(for section: WheelSettingsSection) -> String {
+        switch section {
+        case .projects: "  \(projects.projects.filter { $0.record?.wheelMember == true }.count)/6"
+        case .websites: "  \(preferences.websites.count)/6"
+        default: ""
+        }
+    }
+
+    @ViewBuilder private var projectRows: some View {
+        if projects.projects.isEmpty { message(L10n.t("Select projects in Projects")) }
+        if projects.projects.filter({ $0.record?.wheelMember == true }).count > 6 {
+            message(L10n.t("First six selected projects appear on the wheel."))
+        }
+        ForEach(projects.projects) { project in
+            if project.id != projects.projects.first?.id { Hairline() }
+            SettingsRow(label: project.name) {
+                MiniSwitch(isOn: Binding(get: { project.record?.wheelMember == true },
+                                         set: { projects.setWheelMember(project, $0) }), label: project.name)
+                    .disabled(projects.isWorking)
+            }.help(project.path)
+        }
+        if let error = projects.errorMessage { message(error, color: T.red) }
+    }
+
+    @ViewBuilder private var websiteRows: some View {
+        ForEach(preferences.websites, id: \.self) { url in
+            HStack {
+                Text(url.absoluteString).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                IconButton(symbol: "minus.circle", label: L10n.t("Remove website")) { preferences.removeWebsite(url) }
+            }.font(T.body).padding(.horizontal, T.s3).frame(minHeight: T.rowSingle)
+            Hairline()
+        }
+        HStack {
+            MiniField(placeholder: "https://example.com", text: $address).onSubmit(addSite)
+            Button(L10n.t("Add website"), action: addSite)
+                .buttonStyle(PillButtonStyle(kind: .secondary)).disabled(address.isEmpty || preferences.websites.count >= 6)
+        }.padding(T.s2)
+        if invalidAddress { message(L10n.t("Enter a unique HTTP or HTTPS address (maximum six)."), color: T.red) }
+    }
+
+    private func message(_ text: String, color: Color = T.muted) -> some View {
+        Text(text).font(T.small).foregroundStyle(color).frame(maxWidth: .infinity, alignment: .leading).padding(T.s2)
     }
 
     private func addSite() {

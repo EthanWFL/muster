@@ -4,10 +4,11 @@ import MusterCore
 import SwiftUI
 
 struct ProjectWheelToggle: View {
+    static let symbol = "circle.grid.cross"
     @ObservedObject var wheel: ProjectWheelController
 
     var body: some View {
-        IconButton(symbol: wheel.isVisible ? "chart.pie.fill" : "chart.pie",
+        IconButton(symbol: wheel.isVisible ? Self.symbol + ".fill" : Self.symbol,
                    label: L10n.t(wheel.isVisible ? "Close wheel" : "Start wheel"),
                    tint: wheel.isVisible ? T.accent : T.muted) { wheel.toggle() }
             .accessibilityAddTraits(wheel.isVisible ? .isSelected : [])
@@ -26,7 +27,9 @@ final class ProjectWheelController: NSObject, ObservableObject {
     @Published private(set) var entries: [WheelProject] = []
     @Published private(set) var activeModule: WheelModule?
     let preferences: WheelPreferences
-    var onConfigure: (() -> Void)?
+    var onOpenPage: ((PanelModel.ManagementPage) -> Void)?
+    @Published var pointerInFlyout = false
+    private var lastModulePoint: CGPoint?
     private var flyout: NSPanel?
     private var selectionTask: Task<Void, Never>?
     private var candidate: WheelModule?
@@ -44,7 +47,7 @@ final class ProjectWheelController: NSObject, ObservableObject {
     nonisolated static let hubSize: CGFloat = 48
     nonisolated static let ringWidth: CGFloat = 34
     nonisolated static let diameter = hubSize + 2 * ringWidth
-    nonisolated static let outerDiameter = diameter + 2 * ringWidth
+    @Published private(set) var blinkRequest: UUID?
     var visibleEntries: ArraySlice<WheelProject> { entries.prefix(6) }
 
     init(projects: ProjectsModel, defaults: UserDefaults, board: NSPasteboard = .general) {
@@ -119,8 +122,7 @@ final class ProjectWheelController: NSObject, ObservableObject {
         let area = screen.visibleFrame
         let resting = Self.frame(center: anchor, diameter: Self.hubSize, within: area)
         anchor = CGPoint(x: resting.midX, y: resting.midY)
-        let diameter = activeModule == .projects ? Self.outerDiameter : Self.diameter
-        let frame = expanded ? Self.frame(center: expandedCenter ?? anchor, diameter: diameter, within: area) : resting
+        let frame = expanded ? Self.frame(center: expandedCenter ?? anchor, diameter: Self.diameter, within: area) : resting
         expandedCenter = expanded ? CGPoint(x: frame.midX, y: frame.midY) : nil
         if expanded, panel?.frame != frame { hoverBeforeResize = NSEvent.mouseLocation }
         panel?.setFrame(frame, display: true)
@@ -178,6 +180,7 @@ final class ProjectWheelController: NSObject, ObservableObject {
     }
 
     func open(_ entry: WheelProject) {
+        blinkRequest = UUID()
         collapse()
         var directory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: entry.id, isDirectory: &directory), directory.boolValue else {
@@ -200,6 +203,8 @@ final class ProjectWheelController: NSObject, ObservableObject {
     }
 
     private func closeFlyout() {
+        pointerInFlyout = false
+        lastModulePoint = nil
         flyout?.orderOut(nil)
         flyout?.contentView = nil
         flyout = nil
@@ -211,12 +216,22 @@ final class ProjectWheelController: NSObject, ObservableObject {
             guard hypot(mouse.x - previous.x, mouse.y - previous.y) > 3 else { return }
             hoverBeforeResize = nil
         }
-        guard candidate != module else { return }
+        let mouse = NSEvent.mouseLocation
+        let approaching = flyout.map { popup in
+            let f = popup.frame
+            func distance(_ p: CGPoint) -> CGFloat {
+                return hypot(max(f.minX - p.x, p.x - f.maxX, 0), max(f.minY - p.y, p.y - f.maxY, 0))
+            }
+            return lastModulePoint.map { distance(mouse) + 0.5 < distance($0) } ?? false
+        } ?? false
+        lastModulePoint = mouse
+        guard candidate != module || (approaching && module != activeModule) else { return }
         selectionTask?.cancel()
         candidate = module
         guard let module, module != activeModule else { return }
         selectionTask = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(approaching ? 350 : 150)) } catch { return }
+            guard self?.flyout?.frame.contains(NSEvent.mouseLocation) != true else { return }
             self?.activateModule(module)
         }
     }
@@ -225,8 +240,6 @@ final class ProjectWheelController: NSObject, ObservableObject {
         guard expanded, preferences.modules.contains(module), activeModule != module else { return }
         closeFlyout()
         activeModule = module
-        layout()
-        guard module != .projects else { return }
         let popup = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         popup.isReleasedWhenClosed = false
         popup.backgroundColor = .clear
@@ -249,17 +262,34 @@ final class ProjectWheelController: NSObject, ObservableObject {
               let area = screen(at: anchor)?.visibleFrame else { return }
         let size = WheelFlyout(wheel: self, preferences: preferences, module: module).popupSize
         guard size.width > 0, size.height > 0 else { return }
-        let left = disk.minX - size.width, right = disk.maxX
-        let preferLeft = activeModule == .actions || activeModule == .clipboard
-        let useLeft = preferLeft ? left >= area.minX || right + size.width > area.maxX : right + size.width > area.maxX
-        let x = max(area.minX, min(useLeft ? left : right, area.maxX - size.width))
-        let y = max(area.minY, min(disk.midY - size.height / 2, area.maxY - size.height))
-        flyout.setFrame(CGRect(origin: CGPoint(x: x, y: y), size: size), display: true)
+        let modules = preferences.modules
+        guard let index = modules.firstIndex(of: module) else { return }
+        let angle = WheelSector(index: index, count: modules.count).angle
+        flyout.setFrame(Self.flyoutFrame(disk: disk, size: size, area: area, angle: angle), display: true)
+    }
+
+    static func flyoutFrame(disk: CGRect, size: CGSize, area: CGRect, angle: CGFloat) -> CGRect {
+        // SwiftUI angles increase clockwise; screen coordinates increase upwards.
+        let dx = cos(angle), dy = -sin(angle)
+        let anchor = CGPoint(x: disk.midX + dx * disk.width / 2, y: disk.midY + dy * disk.height / 2)
+        let x = max(area.minX, min(anchor.x - size.width / 2, area.maxX - size.width))
+        let y = max(area.minY, min(anchor.y - size.height / 2, area.maxY - size.height))
+        let options: [(CGFloat, CGPoint)] = [
+            (dx, CGPoint(x: disk.maxX, y: y)), (-dx, CGPoint(x: disk.minX - size.width, y: y)),
+            (dy, CGPoint(x: x, y: disk.maxY)), (-dy, CGPoint(x: x, y: disk.minY - size.height))
+        ]
+        let frames = options.sorted { $0.0 > $1.0 }.map { CGRect(origin: $0.1, size: size) }
+        if let fit = frames.first(where: area.contains) { return fit }
+        return CGRect(origin: CGPoint(x: x, y: y), size: size)
     }
 
     func openConfiguration() {
+        openPage(.wheel)
+    }
+
+    func openPage(_ page: PanelModel.ManagementPage) {
         collapse()
-        onConfigure?()
+        onOpenPage?(page)
     }
 
     func openWebsite(_ url: URL) {
@@ -310,58 +340,6 @@ struct WheelSector: Shape {
     }
 }
 
-struct WheelArcLabel: View {
-    let name: String
-    let angle: Double
-    let count: Int
-
-    static func lines(for name: String) -> [String] {
-        let first = name.prefix(6)
-        let rest = name.dropFirst(first.count)
-        guard !rest.isEmpty else { return [String(first)] }
-        let second = rest.prefix(7)
-        return [String(first), String(second) + (second.endIndex < name.endIndex ? "…" : "")]
-    }
-
-    var body: some View {
-        Canvas { context, size in
-            draw(in: context, size: size)
-        }.allowsHitTesting(false).accessibilityHidden(true)
-    }
-
-    private func draw(in context: GraphicsContext, size: CGSize) {
-        let middle = (size.width + ProjectWheelController.diameter) / 4
-        let direction: CGFloat = sin(angle) > 0.001 ? -1 : 1
-        let sweep = min(CGFloat.pi, 2 * CGFloat.pi / CGFloat(count))
-        let lines = Self.lines(for: name)
-        for (row, line) in lines.enumerated() {
-            let radius = lines.count == 1 ? middle : middle + (row == 0 ? -7 : 7)
-            let glyphs: [(GraphicsContext.ResolvedText, CGFloat)] = line.map { character in
-                let text = Text(verbatim: String(character)).font(T.small.weight(.medium)).foregroundColor(T.fg)
-                let glyph = context.resolve(text)
-                return (glyph, glyph.measure(in: size).width)
-            }
-            let width = glyphs.reduce(CGFloat.zero) { $0 + $1.1 }
-            guard width > 0 else { continue }
-            let available = (radius - 6) * sweep - 2
-            let scale = min(1, available / width)
-            var offset = -width * scale / 2
-            for (glyph, width) in glyphs {
-                let advance = width * scale
-                let theta = CGFloat(angle) + direction * (offset + advance / 2) / radius
-                let x = size.width / 2 + radius * cos(theta)
-                let y = size.height / 2 + radius * sin(theta)
-                var pen = context
-                pen.translateBy(x: x, y: y)
-                pen.rotate(by: .radians(Double(theta + direction * .pi / 2)))
-                pen.scaleBy(x: scale, y: 1)
-                pen.draw(glyph, at: .zero, anchor: .center)
-                offset += advance
-            }
-        }
-    }
-}
-
 private struct WheelModuleRing: View {
     @ObservedObject var wheel: ProjectWheelController
     @ObservedObject var preferences: WheelPreferences
@@ -373,7 +351,7 @@ private struct WheelModuleRing: View {
             ForEach(Array(modules.enumerated()), id: \.element) { index, module in
                 let sector = WheelSector(index: index, count: modules.count)
                 let selected = wheel.activeModule == module
-                sector.fill(selected ? T.accentSoft : T.card)
+                sector.fill(selected && !wheel.pointerInFlyout ? T.accentSoft : T.card)
                 sector.stroke(T.line, lineWidth: 1)
                 Image(systemName: module.symbol).font(.system(size: 15, weight: .medium))
                     .foregroundStyle(selected ? T.accent : T.ctlFg)
@@ -402,26 +380,13 @@ private struct WheelModuleRing: View {
 private struct ProjectWheelFace: View {
     @ObservedObject var wheel: ProjectWheelController
     @ReducedMotion private var reduceMotion
-    @State private var hovered: String?
-    @State private var blinkRequest: UUID?
     @State private var blinkFrame: NSImage?
 
     private var direction: CGPoint {
-        let entries = wheel.visibleEntries
-        if !reduceMotion, wheel.expanded, hovered == nil, let active = wheel.activeModule,
-           let index = wheel.preferences.modules.firstIndex(of: active) {
-            let angle = WheelSector(index: index, count: wheel.preferences.modules.count).angle
-            return CGPoint(x: cos(angle), y: sin(angle))
-        }
-        guard !reduceMotion, wheel.expanded, let index = entries.firstIndex(where: { $0.id == hovered }) else { return .zero }
-        let angle = WheelSector(index: index - entries.startIndex, count: entries.count).angle
+        guard !reduceMotion, wheel.expanded, let active = wheel.activeModule,
+              let index = wheel.preferences.modules.firstIndex(of: active) else { return .zero }
+        let angle = WheelSector(index: index, count: wheel.preferences.modules.count).angle
         return CGPoint(x: cos(angle), y: sin(angle))
-    }
-
-    private func select(_ entry: WheelProject) {
-        hovered = nil
-        if !reduceMotion { blinkRequest = UUID() }
-        wheel.open(entry)
     }
 
     private func mark(_ image: NSImage, tint: Color = T.fg) -> some View {
@@ -448,40 +413,6 @@ private struct ProjectWheelFace: View {
 
     var body: some View {
         ZStack {
-            if wheel.expanded && wheel.activeModule == .projects {
-                let projects = Array(wheel.visibleEntries)
-                ZStack {
-                    Circle().fill(T.card)
-                    ForEach(Array(projects.enumerated()), id: \.element.id) { index, entry in
-                        let sector = WheelSector(index: index, count: projects.count)
-                        ZStack {
-                            sector.fill(hovered == entry.id ? T.accentSoft : T.card)
-                            sector.stroke(T.line, lineWidth: 1)
-                            WheelArcLabel(name: entry.name, angle: sector.angle, count: projects.count)
-                        }
-
-                    }
-                    if projects.isEmpty {
-                        WheelArcLabel(name: L10n.t("Select projects in Projects"), angle: .pi / 2, count: 1)
-                    }
-                }.frame(width: ProjectWheelController.outerDiameter, height: ProjectWheelController.outerDiameter)
-                .clipShape(Circle()).contentShape(Circle())
-                .onContinuousHover { phase in
-                    if case .active(let p) = phase, let i = WheelSector.index(at: p, count: projects.count, diameter: ProjectWheelController.outerDiameter, innerDiameter: ProjectWheelController.diameter) {
-                        wheel.hoverModule(nil)
-                        hovered = projects[i].id
-                    } else { hovered = nil }
-                }
-                .onTapGesture(coordinateSpace: .local) { p in
-                    if let i = WheelSector.index(at: p, count: projects.count, diameter: ProjectWheelController.outerDiameter, innerDiameter: ProjectWheelController.diameter) { select(projects[i]) }
-                }
-                .onDisappear { hovered = nil }
-                .help(hovered ?? "")
-                .accessibilityRepresentation {
-                    ForEach(projects) { entry in Button(entry.name) { select(entry) } }
-                }
-                .transition(.scale(scale: 0.4).combined(with: .opacity))
-            }
             if wheel.expanded { WheelModuleRing(wheel: wheel, preferences: wheel.preferences) }
             ZStack {
                 Circle().fill(T.card)
@@ -489,20 +420,15 @@ private struct ProjectWheelFace: View {
                 Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.6)
                 panda.frame(width: 28, height: 28).accessibilityHidden(true)
             }.frame(width: ProjectWheelController.hubSize, height: ProjectWheelController.hubSize).contentShape(Circle())
-            .onHover { if $0 { hovered = nil; wheel.hoverModule(nil); wheel.enteredHub() } }
+            .onHover { if $0 { wheel.hoverModule(nil); wheel.enteredHub() } }
             .gesture(DragGesture(minimumDistance: 0).onChanged { _ in wheel.dragChanged() }.onEnded { _ in wheel.dragEnded() })
             .accessibilityLabel(L10n.t("Project wheel"))
             .help(L10n.t("Drag to move the wheel."))
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onHover { inside in
-            if !inside { hovered = nil }
-            wheel.track(inside)
-        }
-        .onChange(of: wheel.activeModule) { _, _ in hovered = nil }
-        .onChange(of: reduceMotion) { _, reduced in if reduced { blinkRequest = nil } }
-        .task(id: blinkRequest) {
+        .onHover { wheel.track($0) }
+        .task(id: wheel.blinkRequest) {
             blinkFrame = nil
-            guard blinkRequest != nil, !reduceMotion else { return }
+            guard wheel.blinkRequest != nil, !reduceMotion else { return }
             for frame in MenuBarIcon.frames.dropLast() {
                 blinkFrame = frame
                 do { try await Task.sleep(for: .milliseconds(45)) } catch { return }

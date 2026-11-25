@@ -43,10 +43,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessions, _ in self?.updateSessionCounts(sessions) }
 
-        model.projects.wheel.onConfigure = { [weak self] in
+        model.projects.wheel.onOpenPage = { [weak self] page in
             guard let self else { return }
             self.closeIfShown()
-            self.model.managementPage = .wheel
+            self.model.managementPage = page
             self.management.open()
         }
         SettingsCoordinator.shared.onOpenPanel = { [weak self] in

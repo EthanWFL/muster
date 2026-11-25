@@ -1,10 +1,26 @@
-import Foundation
+import AppKit
 import Testing
 @testable import MusterCore
 @testable import Muster
 
 @Suite @MainActor struct ChatTests {
     private typealias Client = OpenAIResponsesClient
+
+    @Test func composerPlaceholderFollowsInputMethodComposition() throws {
+        let scroll = ChatInputTextView.scrollableTextView()
+        let input = try #require(scroll.documentView as? ChatInputTextView)
+        let selection = NSRange(location: NSNotFound, length: 0)
+        #expect(input.showsPlaceholder)
+        input.setMarkedText("dang", selectedRange: NSRange(location: 4, length: 0), replacementRange: selection)
+        #expect(input.hasMarkedText() && !input.showsPlaceholder)
+        input.insertText("", replacementRange: input.markedRange())
+        #expect(input.showsPlaceholder)
+        input.setMarkedText("dangqian", selectedRange: NSRange(location: 8, length: 0), replacementRange: selection)
+        input.insertText("当前", replacementRange: input.markedRange())
+        #expect(input.string == "当前" && !input.showsPlaceholder)
+        input.string = ""
+        #expect(input.showsPlaceholder)
+    }
 
     @Test func streamsTextAndPreservesCompletedToolItems() throws {
         let delta = try Client.event(from: #"data: {"type":"response.output_text.delta","delta":"你好"}"#)

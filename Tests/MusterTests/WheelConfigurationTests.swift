@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 import MusterCore
 @testable import Muster
@@ -45,34 +46,88 @@ import MusterCore
         #expect(next.websites == prefs.websites && next.modules == [.projects,.websites,.actions])
     }
 
-    @Test func outerRingUsesOnlyProjectBand() {
-        let d = ProjectWheelController.outerDiameter, inner = ProjectWheelController.diameter
-        let center = CGPoint(x: d / 2, y: d / 2)
-        for count in 1...6 {
-            for index in 0..<count {
-                let angle = WheelSector(index: index, count: count).angle
-                for r in [inner / 2 + 1, d / 2 - 1] {
-                    let p = CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle))
-                    #expect(WheelSector.index(at: p, count: count, diameter: d, innerDiameter: inner) == index)
+    @Test func flyoutsFollowSectorDirectionAndFitScreenCorners() {
+        let area = CGRect(x: -800, y: 50, width: 800, height: 700)
+        let disk = CGRect(x: -450, y: 300, width: 116, height: 116)
+        let size = CGSize(width: 200, height: 238)
+        func frame(_ angle: CGFloat, _ disk: CGRect) -> CGRect {
+            ProjectWheelController.flyoutFrame(disk: disk, size: size, area: area, angle: angle)
+        }
+        #expect(frame(0, disk).minX == disk.maxX)
+        #expect(frame(.pi / 2, disk).maxY == disk.minY)
+        #expect(frame(.pi, disk).maxX == disk.minX)
+        #expect(frame(-.pi / 2, disk).minY == disk.maxY)
+        for x in [area.minX, area.maxX - disk.width] {
+            for y in [area.minY, area.maxY - disk.height] {
+                let corner = CGRect(origin: CGPoint(x: x, y: y), size: disk.size)
+                for i in 0..<4 {
+                    let popup = frame(CGFloat(i) * .pi / 2, corner)
+                    #expect(area.contains(popup))
+                    #expect(popup.intersection(corner).width * popup.intersection(corner).height == 0)
                 }
             }
-            #expect(WheelSector.index(at: center, count: count, diameter: d, innerDiameter: inner) == nil)
         }
     }
 
-    @Test func wheelConfigurationAndHideActions() throws {
+    @Test func clipboardURLPresentationKeepsEndOfLinkAndDistinguishesPlainText() {
+        let preview = WheelFlyout.clipPreview("https://example.com:8443/projects/path/report?q=1#section")
+        #expect(preview.isLink && preview.label == "example.com:8443/projects/path/report?q=1#section")
+        let plain = WheelFlyout.clipPreview("https://example.com followed by text")
+        #expect(!plain.isLink && plain.label.hasPrefix("https://"))
+    }
+
+    @Test func projectSectorOpensAnAdjacentFlyoutWithoutGrowingTheWheel() throws {
         let suite = UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = PanelModel(projectDefaults: defaults)
         let wheel = model.projects.wheel
-        wheel.onConfigure = { model.managementPage = .wheel }
-        defer { wheel.onConfigure = nil; if wheel.isVisible { wheel.toggle() } }
+        let existing = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
+        wheel.toggle()
+        defer { if wheel.isVisible { wheel.toggle() } }
+        wheel.enteredHub()
+        let disk = try #require(NSApplication.shared.windows.first { !existing.contains(ObjectIdentifier($0)) && $0.isVisible && $0.frame.width == ProjectWheelController.diameter })
+        let frame = disk.frame
+        wheel.activateModule(.projects)
+        let popup = try #require(NSApplication.shared.windows.first {
+            guard let host = $0.contentView as? NSHostingView<WheelFlyout> else { return false }
+            return $0.isVisible && host.rootView.wheel === wheel && host.rootView.module == .projects
+        })
+        #expect(disk.frame == frame)
+        #expect(!popup.frame.intersects(frame.insetBy(dx: 1, dy: 1)))
+        wheel.collapse()
+        #expect(!popup.isVisible)
+    }
+
+    @Test func wheelAnchorsRememberTheirSectionIndependentlyOfSettings() {
+        let model = PanelModel()
+        model.showSettings(.interface)
+        model.showWheelSection(.websites)
+        let firstRequest = model.wheelScrollRequest
+        model.showWheelSection(.websites)
+        #expect(model.managementPage == .wheel && model.wheelScrollRequest == firstRequest + 1)
+        model.wheelSection = .clipboard  // Manual scrolling only moves the sidebar highlight.
+        #expect(model.wheelScrollRequest == firstRequest + 1)
+        model.showSettings(.interface)
+        #expect(model.wheelSection == .clipboard && model.settingsSection == .interface)
+    }
+
+    @Test func wheelConfigurationChatAndHideActions() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = PanelModel(projectDefaults: defaults)
+        let wheel = model.projects.wheel
+        wheel.onOpenPage = { model.managementPage = $0 }
+        defer { wheel.onOpenPage = nil; if wheel.isVisible { wheel.toggle() } }
         wheel.toggle()
         wheel.enteredHub(); wheel.activateModule(.actions)
         #expect(wheel.activeModule == .actions)
         wheel.openConfiguration()
         #expect(model.managementPage == .wheel && !model.showsSettings && !wheel.expanded)
+        wheel.enteredHub(); wheel.activateModule(.actions)
+        wheel.openPage(.chat)
+        #expect(model.managementPage == .chat && !wheel.expanded && wheel.activeModule == nil)
         wheel.enteredHub(); wheel.activateModule(.actions); wheel.toggle()
         #expect(!wheel.isVisible && wheel.activeModule == nil)
         model.showsSettings = false

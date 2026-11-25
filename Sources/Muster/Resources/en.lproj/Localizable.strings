@@ -721,8 +721,12 @@
 "Clipboard" = "Clipboard";
 "Quick settings" = "Quick settings";
 "Wheel configuration" = "Wheel configuration";
-"Inner ring" = "Inner ring";
-"Wheel projects" = "Wheel projects";
+"Visible entries" = "Visible entries";
+"Quick projects" = "Quick projects";
+"Favorite websites" = "Favorite websites";
+"Clipboard history" = "Clipboard history";
+"Choose which entries appear in the inner ring." = "Choose which entries appear in the inner ring.";
+"Choose up to six projects to open from the project menu." = "Choose up to six projects to open from the project menu.";
 "Add website" = "Add website";
 "Enter a unique HTTP or HTTPS address (maximum six)." = "Enter a unique HTTP or HTTPS address (maximum six).";
 "Keep the last 10 copied texts in memory" = "Keep the last 10 copied texts in memory";

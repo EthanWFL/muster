@@ -722,8 +722,12 @@
 "Clipboard" = "剪贴板";
 "Quick settings" = "快捷设置";
 "Wheel configuration" = "轮盘配置";
-"Inner ring" = "内圈入口";
-"Wheel projects" = "外圈项目";
+"Visible entries" = "入口开关";
+"Quick projects" = "快捷项目";
+"Favorite websites" = "常用网站";
+"Clipboard history" = "剪贴板历史";
+"Choose which entries appear in the inner ring." = "选择轮盘内圈显示的入口。";
+"Choose up to six projects to open from the project menu." = "最多选择 6 个项目，点击项目浮窗中的名称即可打开。";
 "Add website" = "添加网站";
 "Enter a unique HTTP or HTTPS address (maximum six)." = "请输入未添加过的 HTTP 或 HTTPS 网址，最多六个。";
 "Keep the last 10 copied texts in memory" = "在内存中记录最近复制的 10 条文本";

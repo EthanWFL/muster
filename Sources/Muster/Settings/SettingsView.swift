@@ -34,56 +34,11 @@ struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var model: PanelModel
     @ObservedObject private var updates = SettingsCoordinator.shared
-    @ReducedMotion private var reduceMotion
     @State private var webhookResult: String?
-    @State private var hasPositionedInitialSection = false
 
     var body: some View {
-        GeometryReader { viewport in
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(SettingsSection.allCases) { section in
-                            sectionContent(section)
-                                .padding(.top, 24)
-                                .padding(.bottom, section == .about ? 24 : 0)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                // Leave enough trailing space to align even the last anchor at the top.
-                                .frame(minHeight: section == .about ? viewport.size.height : nil, alignment: .top)
-                                .background(GeometryReader { geometry in
-                                    Color.clear.preference(key: SettingsSectionFrames.self,
-                                        value: [section: geometry.frame(in: .named("settings-scroll"))])
-                                })
-                                .id(section)
-                                .zIndex(section == .interface ? 1 : 0)
-                        }
-                    }
-                    .frame(maxWidth: 760, alignment: .leading)
-                    .padding(.horizontal, 24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .coordinateSpace(name: "settings-scroll")
-                .scrollBounceBehavior(.basedOnSize)
-                .scrollIndicators(.visible)
-                .onPreferenceChange(SettingsSectionFrames.self) { frames in
-                    guard frames.count == SettingsSection.allCases.count else { return }
-                    if !hasPositionedInitialSection {
-                        hasPositionedInitialSection = true
-                        proxy.scrollTo(model.settingsSection, anchor: .top)
-                    } else if let visible = SettingsSection.allCases.last(where: { (frames[$0]?.minY ?? .infinity) <= 1 }),
-                              model.settingsSection != visible {
-                        // Updating the highlight must not issue another scroll request.
-                        model.settingsSection = visible
-                    }
-                }
-                .onChange(of: model.settingsScrollRequest) { _, _ in
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
-                        proxy.scrollTo(model.settingsSection, anchor: .top)
-                    }
-                }
-            }
-        }
-        .clipped()
+        AnchoredSettingsScroll(sections: SettingsSection.allCases, selection: $model.settingsSection,
+                               scrollRequest: model.settingsScrollRequest, raisedSection: .interface, content: sectionContent)
     }
 
     @ViewBuilder private func sectionContent(_ section: SettingsSection) -> some View {
@@ -313,11 +268,66 @@ struct SettingsView: View {
 
 }
 
-private struct SettingsSectionFrames: PreferenceKey {
-    static var defaultValue: [SettingsSection: CGRect] = [:]
+private struct SettingsSectionFrames<Section: Hashable>: PreferenceKey {
+    static var defaultValue: [Section: CGRect] { [:] }
 
-    static func reduce(value: inout [SettingsSection: CGRect], nextValue: () -> [SettingsSection: CGRect]) {
+    static func reduce(value: inout [Section: CGRect], nextValue: () -> [Section: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+struct AnchoredSettingsScroll<Section: Hashable, Content: View>: View {
+    let sections: [Section]
+    @Binding var selection: Section
+    let scrollRequest: Int
+    var raisedSection: Section? = nil
+    @ViewBuilder var content: (Section) -> Content
+    @ReducedMotion private var reduceMotion
+    @Namespace private var space
+    @State private var positioned = false
+
+    var body: some View {
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(sections, id: \.self) { section in
+                            content(section)
+                                .padding(.top, 24)
+                                .padding(.bottom, section == sections.last ? 24 : 0)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(minHeight: section == sections.last ? viewport.size.height : nil, alignment: .top)
+                                .background(GeometryReader { geometry in
+                                    Color.clear.preference(key: SettingsSectionFrames<Section>.self,
+                                        value: [section: geometry.frame(in: .named(space))])
+                                })
+                                .id(section)
+                                .zIndex(section == raisedSection ? 1 : 0)
+                        }
+                    }
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .coordinateSpace(name: space)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.visible)
+                .onPreferenceChange(SettingsSectionFrames<Section>.self) { frames in
+                    guard frames.count == sections.count else { return }
+                    if !positioned {
+                        positioned = true
+                        proxy.scrollTo(selection, anchor: .top)
+                    } else if let visible = sections.last(where: { (frames[$0]?.minY ?? .infinity) <= 1 }), selection != visible {
+                        selection = visible
+                    }
+                }
+                .onChange(of: scrollRequest) { _, _ in
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(selection, anchor: .top)
+                    }
+                }
+            }
+        }.clipped()
     }
 }
 

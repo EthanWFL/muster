@@ -55,15 +55,6 @@ import MusterCore
         #expect(reopened.wheel.entries.isEmpty)
     }
 
-    @Test func wheelNamesWrapAfterSixCharactersAndEllipsizeAfterThirteen() {
-        #expect(WheelArcLabel.lines(for: "short") == ["short"])
-        #expect(WheelArcLabel.lines(for: "muster") == ["muster"])
-        #expect(WheelArcLabel.lines(for: "1234567") == ["123456", "7"])
-        #expect(WheelArcLabel.lines(for: "1234567890123") == ["123456", "7890123"])
-        #expect(WheelArcLabel.lines(for: "一二三四五六七八九十甲乙丙丁") == ["一二三四五六", "七八九十甲乙丙…"])
-        #expect(WheelArcLabel.lines(for: "12345👩🏽‍💻7") == ["12345👩🏽‍💻", "7"])
-    }
-
     @Test func hitTestMatchesEveryDrawnSectorAwayFromDividers() {
         let r = ProjectWheelController.diameter / 2
         let hub = ProjectWheelController.hubSize / 2

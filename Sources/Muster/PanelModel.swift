@@ -72,6 +72,8 @@ final class PanelModel: ObservableObject {
         get { managementPage == .settings }
         set { managementPage = newValue ? .settings : .workspace }
     }
+    @Published var wheelSection: WheelSettingsSection = .inner
+    @Published private(set) var wheelScrollRequest = 0
     @Published var settingsSection: SettingsSection = .general
     @Published private(set) var settingsScrollRequest = 0
     @Published var tabOrder: [Tab] = PanelModel.storedTabOrder() {
@@ -96,6 +98,12 @@ final class PanelModel: ObservableObject {
         AgentNavigation.migrate(.standard)
         let raw = UserDefaults.standard.stringArray(forKey: tabOrderKey) ?? []
         return raw.compactMap(Tab.init(rawValue:))
+    }
+
+    func showWheelSection(_ section: WheelSettingsSection) {
+        wheelSection = section
+        managementPage = .wheel
+        wheelScrollRequest += 1
     }
 
     func toggleSettings() { showsSettings.toggle() }

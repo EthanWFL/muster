@@ -60,7 +60,8 @@ struct PanelView: View {
                 } else if presentation == .window && model.managementPage == .chat {
                     ChatView(chat: model.chat, panel: model, settings: settings)
                 } else if presentation == .window && model.managementPage == .wheel {
-                    WheelConfigurationView(projects: model.projects, preferences: model.projects.wheel.preferences)
+                    WheelConfigurationView(projects: model.projects, preferences: model.projects.wheel.preferences,
+                                           section: $model.wheelSection, scrollRequest: model.wheelScrollRequest)
                 } else {
                     tabs
                 }

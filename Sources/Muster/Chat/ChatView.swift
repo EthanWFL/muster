@@ -134,13 +134,7 @@ struct ChatView: View {
                 Text(L10n.t("Messages can contain up to %d characters.", ChatModel.draftLimit)).font(T.small).foregroundStyle(T.red)
             }
             HStack(alignment: .bottom, spacing: T.s2) {
-                ZStack(alignment: .topLeading) {
-                    ChatEditor(text: $chat.draft, enabled: chat.keyIsSaved, send: send)
-                    if chat.draft.isEmpty {
-                        Text(L10n.t("Message Muster…")).font(T.body).foregroundStyle(T.muted)
-                            .allowsHitTesting(false).accessibilityHidden(true)
-                    }
-                }
+                ChatEditor(text: $chat.draft, enabled: chat.keyIsSaved, send: send)
                 if chat.isGenerating {
                     composerButton("stop.fill", title: L10n.t("Stop generating"), action: chat.stop)
                 } else {
@@ -217,6 +211,28 @@ private struct ChatSessionCard: View {
     }
 }
 
+final class ChatInputTextView: NSTextView {
+    var showsPlaceholder: Bool { string.isEmpty && !hasMarkedText() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard showsPlaceholder, let font else { return }
+        (L10n.t("Message Muster…") as NSString).draw(at: textContainerOrigin, withAttributes: [
+            .font: font, .foregroundColor: NSColor(T.muted)
+        ])
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+    }
+}
+
 private struct ChatEditor: NSViewRepresentable {
     @Binding var text: String
     let enabled: Bool
@@ -225,7 +241,7 @@ private struct ChatEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(editor: self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = ChatInputTextView.scrollableTextView()
         let view = scroll.documentView as! NSTextView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
@@ -241,7 +257,10 @@ private struct ChatEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.editor = self
         guard let view = scroll.documentView as? NSTextView else { return }
-        if view.string != text, !view.hasMarkedText() { view.string = text }
+        if view.string != text, !view.hasMarkedText() {
+            view.string = text
+            view.needsDisplay = true
+        }
         view.font = .systemFont(ofSize: SettingsStore.shared.comfortableLayout ? 14 : 12.5)
         view.textColor = NSColor(T.fg)
         view.insertionPointColor = NSColor(T.fg)
