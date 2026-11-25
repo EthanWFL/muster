@@ -1,4 +1,5 @@
 "Sessions" = "Sessions";
+"Session history" = "Session history";
 "Rules" = "Rules";
 "No active sessions" = "No active sessions";
 "Open sessions of installed agents show up here" = "Open sessions of installed agents show up here";
@@ -721,6 +722,7 @@
 "Clipboard" = "Clipboard";
 "Quick settings" = "Quick settings";
 "Wheel configuration" = "Wheel configuration";
+"Wheel setup" = "Wheel setup";
 "Visible entries" = "Visible entries";
 "Quick projects" = "Quick projects";
 "Favorite websites" = "Favorite websites";
@@ -743,6 +745,7 @@
 
 /* Chat */
 "Chat" = "Chat";
+"AI chat" = "AI chat";
 "Chat model" = "Chat model";
 "New conversation" = "New conversation";
 "Ask Muster about your projects or recent sessions." = "Ask Muster about your projects or recent sessions.";

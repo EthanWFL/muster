@@ -18,7 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "slider.horizontal.3"
-        case .agents: return "terminal"
+        case .agents: return "person.2"
         case .chat: return "bubble.left"
         case .notifications: return "bell"
         case .interface: return "rectangle.3.group"

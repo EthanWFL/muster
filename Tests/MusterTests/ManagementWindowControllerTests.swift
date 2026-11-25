@@ -134,6 +134,45 @@ import MusterCore
         #expect(host.convert(host.bounds, to: nil).maxY <= window.contentLayoutRect.maxY + 1)
     }
 
+    @Test func expandedSidebarGroupsShareOneScrollViewAtMinimumWindowHeight() async throws {
+        let fixture = WindowFixture()
+        let settings = SettingsStore.shared
+        let previousMotion = settings.reduceMotion
+        let previousLayout = settings.comfortableLayout
+        defer {
+            fixture.cleanup()
+            settings.reduceMotion = previousMotion
+            settings.comfortableLayout = previousLayout
+        }
+        settings.reduceMotion = .off
+        settings.comfortableLayout = true
+        fixture.model.tab = .agent
+        fixture.controller.open()
+        let window = try #require(fixture.controller.window)
+        window.setFrameAutosaveName("")
+        var frame = window.frame
+        frame.size = window.minSize
+        window.setFrame(frame, display: false)
+        try await Task.sleep(for: .milliseconds(150))
+
+        for page in [PanelModel.ManagementPage.settings, .wheel] {
+            if page == .settings { fixture.model.showSettings(.about) }
+            else { fixture.model.showWheelSection(.clipboard) }
+            try await Task.sleep(for: .milliseconds(500))
+            let host = try #require(window.contentViewController?.view)
+            host.layoutSubtreeIfNeeded()
+            let sidebarScrolls = scrollViews(in: host).filter { host.convert($0.bounds, from: $0).maxX < host.bounds.midX }
+            #expect(sidebarScrolls.count == 1)
+            let scroll = try #require(sidebarScrolls.first)
+            let document = try #require(scroll.documentView)
+            #expect(document.bounds.height > scroll.contentView.bounds.height)
+            #expect(scroll.documentVisibleRect.minY > document.bounds.minY)
+            let trailingSpace = T.s3 + (page == .wheel ? T.rowSingle + T.s1 : 0)
+            #expect(scroll.documentVisibleRect.maxY >= document.bounds.maxY - trailingSpace - 1)
+            #expect(scroll.frame.height >= host.bounds.height - 1)
+        }
+    }
+
     private func scrollViews(in view: NSView) -> [NSScrollView] {
         (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap { scrollViews(in: $0) }
     }

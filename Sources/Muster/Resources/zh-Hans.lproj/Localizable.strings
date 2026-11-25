@@ -1,4 +1,5 @@
 "Sessions" = "会话";
+"Session history" = "会话记录";
 "Rules" = "规则";
 "No active sessions" = "暂无活动会话";
 "Open sessions of installed agents show up here" = "本机装过的 agent 打开的会话会显示在这里";
@@ -624,7 +625,7 @@
 "No Agents in the current scope support skill deployment. You can still manage the library." = "当前管理范围内没有可部署技能的 Agent，仍可管理技能库。";
 "This deployment includes Agents outside the current scope. Select them in Settings before restoring it." = "此部署包含当前管理范围外的 Agent，请先在设置中重新勾选，再恢复部署。";
 "%@ (outside current scope)" = "%@（范围外）";
-"Agent scope" = "Agent 管理";
+"Agent scope" = "Agent 管理范围";
 
 "Manage skills in the main window" = "在大窗口中管理技能";
 "Saved defaults apply to new Agent sessions." = "保存的默认配置将在新 Agent 会话中生效。";
@@ -722,6 +723,7 @@
 "Clipboard" = "剪贴板";
 "Quick settings" = "快捷设置";
 "Wheel configuration" = "轮盘配置";
+"Wheel setup" = "轮盘配置";
 "Visible entries" = "入口开关";
 "Quick projects" = "快捷项目";
 "Favorite websites" = "常用网站";
@@ -744,6 +746,7 @@
 
 /* 对话 */
 "Chat" = "对话";
+"AI chat" = "AI 对话";
 "Chat model" = "对话模型";
 "New conversation" = "新对话";
 "Ask Muster about your projects or recent sessions." = "可以问 Muster 有哪些项目，或者查找最近的会话。";
