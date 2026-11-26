@@ -2,7 +2,7 @@
 
 Muster 是一个原生 macOS 菜单栏工具，用来集中管理本机 AI Agent 的会话、共享规则、技能和模型配置。经常同时使用 Claude Code、Codex、Pi 等工具时，可以在一个面板里切回正在使用的客户端、查看历史会话，或修改常用设置。
 
-[下载最新版](https://github.com/EthanWFL/muster/releases/latest) · [1.3.2 更新记录](docs/releases/1.3.2.md) · [全部版本](https://github.com/EthanWFL/muster/releases) · [详细使用说明](docs/usage.md)
+[下载最新版](https://github.com/EthanWFL/muster/releases/latest) · [1.3.3 更新记录](docs/releases/1.3.3.md) · [全部版本](https://github.com/EthanWFL/muster/releases) · [详细使用说明](docs/usage.md)
 
 ## 能做什么
 
