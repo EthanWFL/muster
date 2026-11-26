@@ -1,9 +1,10 @@
-import MusterCore
 import AppKit
-import Foundation
 import Combine
+import Foundation
+import MusterCore
 
-/// 面板状态与会话扫描的装配点；所有发布状态都在主线程更新。
+/// Navigation and per-surface selection. Long-lived feature models and the
+/// session scan loop live in `AppEnvironment`.
 @MainActor
 final class PanelModel: ObservableObject {
     @Published private(set) var sessions: [Session] = []
@@ -17,11 +18,20 @@ final class PanelModel: ObservableObject {
     @Published var selectedSessionKey: String?
     @Published private(set) var searchFocusRequest = 0
     @Published private(set) var lastSessionRefresh: Date?
-    private var allScannedSessions: [Session] = []
-    private var scopeObservation: AnyCancellable?
-    private var lastAppliedAgentIDs: Set<String>?
-    private var started = false
-    private var sessionRescanRequested = false
+    @Published private(set) var lastScanError: String?
+
+    let environment: AppEnvironment
+    private var environmentObservations = Set<AnyCancellable>()
+
+    var projects: ProjectsModel { environment.projects }
+    var library: SessionLibraryModel { environment.library }
+    var env: EnvironmentModel { environment.env }
+    var instructions: InstructionsModel { environment.instructions }
+    var configuration: ConfigurationModel { environment.configuration }
+    var diagnostics: DiagnosticsModel { environment.diagnostics }
+    var chat: ChatModel { environment.chat }
+    var agentWorkspace: AgentWorkspaceModel { environment.agentWorkspace }
+    var agentSelection: AgentSelectionModel { environment.agentSelection }
 
     func focusSessionSearch(showInManagementWindow: Bool = true) {
         if showInManagementWindow { showsSettings = false }
@@ -33,12 +43,6 @@ final class PanelModel: ObservableObject {
         sessionSearch = ""
         sessionFilter = .all
     }
-    private var scanTask: Task<Void, Never>?
-    private var activityMonitor = SessionActivityMonitor()
-    private let sessionStore = SessionStore()
-    private let notifier = NotificationService()
-    private let scanners = AgentRegistry.transcriptScanners()
-    private var diskTimer: Timer?
 
     enum Tab: String, CaseIterable {
         case projects = "Projects", sessions = "Sessions", agent = "Agent", environment = "Environment"
@@ -51,6 +55,92 @@ final class PanelModel: ObservableObject {
             case .environment: return L10n.t("Cleanup")
             case .agent: return L10n.t("Agent")
             }
+        }
+
+        var sidebarTitle: String {
+            self == .sessions ? L10n.t("Session history") : title
+        }
+
+        var symbol: String {
+            switch self {
+            case .projects: return "folder"
+            case .sessions: return "clock"
+            case .environment: return "sparkles"
+            case .agent: return "terminal"
+            }
+        }
+    }
+
+    /// One table drives the sidebar and the content area.
+    enum Destination: Hashable, Identifiable {
+        case workspace(Tab)
+        case chat
+        case wheel
+        case settings
+
+        var id: String {
+            switch self {
+            case .workspace(let tab): return "workspace." + tab.rawValue
+            case .chat: return "chat"
+            case .wheel: return "wheel"
+            case .settings: return "settings"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .workspace(let tab): return tab.title
+            case .chat: return L10n.t("AI chat")
+            case .wheel: return L10n.t("Wheel setup")
+            case .settings: return L10n.t("Settings")
+            }
+        }
+
+        var sidebarTitle: String {
+            switch self {
+            case .workspace(let tab): return tab.sidebarTitle
+            case .chat: return L10n.t("AI chat")
+            case .wheel: return L10n.t("Wheel setup")
+            case .settings: return L10n.t("Settings")
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .workspace(let tab): return tab.symbol
+            case .chat: return "bubble.left"
+            case .wheel: return "circle.grid.cross"
+            case .settings: return "gearshape"
+            }
+        }
+    }
+
+    var destination: Destination {
+        switch managementPage {
+        case .chat: return .chat
+        case .wheel: return .wheel
+        case .settings: return .settings
+        case .workspace: return .workspace(tab)
+        }
+    }
+
+    var workspaceDestinations: [Destination] {
+        orderedTabs.flatMap { tab -> [Destination] in
+            tab == .sessions ? [.workspace(tab), .chat] : [.workspace(tab)]
+        }
+    }
+
+    func select(_ destination: Destination) {
+        switch destination {
+        case .workspace(let tab):
+            showsSettings = false
+            self.tab = tab
+        case .chat:
+            managementPage = .chat
+        case .wheel:
+            managementPage = .wheel
+        case .settings:
+            managementPage = .settings
         }
     }
 
@@ -119,47 +209,37 @@ final class PanelModel: ObservableObject {
         if let url = URL(string: "https://github.com/EthanWFL/muster") { NSWorkspace.shared.open(url) }
     }
 
-    let env = EnvironmentModel()
-    let instructions: InstructionsModel
-    let configuration: ConfigurationModel
-    let diagnostics = DiagnosticsModel()
-    let chat = ChatModel()
-    let library: SessionLibraryModel
-    let projects: ProjectsModel
-    let agentWorkspace: AgentWorkspaceModel
-    let agentSelection: AgentSelectionModel
+    /// Areas that would lose edits if the app terminates now.
+    var unsavedAreas: [String] {
+        var areas: [String] = []
+        if library.dirty { areas.append(L10n.t("Session details")) }
+        if instructions.isDirty { areas.append(L10n.t("Instructions")) }
+        if configuration.dirty { areas.append(L10n.t("Agent configuration")) }
+        if agentWorkspace.skills.unsaved || agentWorkspace.skills.dirty
+            || agentWorkspace.skills.deploymentDirty || agentWorkspace.skills.batchDirty {
+            areas.append(L10n.t("Skill draft"))
+        }
+        return areas
+    }
 
     init(library: SessionLibraryModel? = nil, projectStore: ProjectStore = ProjectStore(),
          projectDefaults: UserDefaults = .standard, instructionsModel: InstructionsModel? = nil,
          configurationModel: ConfigurationModel? = nil, skillsModel: SkillsModel? = nil,
          detectInstalledAgents: @escaping @Sendable () -> [AgentDescriptor] = { AgentInstallation.detect() },
          settingsStore: SettingsStore? = nil) {
-        let library = library ?? SessionLibraryModel()
-        self.library = library
-        instructions = instructionsModel ?? InstructionsModel()
-        configuration = configurationModel ?? ConfigurationModel()
-        projects = ProjectsModel(library: library, store: projectStore, defaults: projectDefaults)
-        agentSelection = AgentSelectionModel(settings: settingsStore ?? SettingsStore.shared, detect: detectInstalledAgents)
-        agentWorkspace = AgentWorkspaceModel(instructions: instructions, configuration: configuration, skills: skillsModel,
-                                             selection: agentSelection)
-        scopeObservation = agentSelection.$state.sink { [weak self] state in
-            guard let self else { return }
-            self.objectWillChange.send()
-            guard self.lastAppliedAgentIDs != state.managedIDs else { return }
-            if self.lastAppliedAgentIDs != nil { self.chat.newConversation() }
-            self.lastAppliedAgentIDs = state.managedIDs
-            self.applyAgentScope(state.managedIDs)
-        }
-    }
-
-    private func applyAgentScope(_ ids: Set<String>) {
-        sessions = allScannedSessions.filter { ids.contains($0.agent.rawValue) }
-        library.managedAgentIDs = ids
-        diagnostics.restrictToAgents(ids)
-        env.restrictToAgents(ids)
-        activityMonitor = SessionActivityMonitor()
-        if let key = selectedSessionKey, !sessions.contains(where: { $0.key == key }) { selectedSessionKey = nil }
-        if started { refreshSessions() }
+        environment = AppEnvironment(library: library, projectStore: projectStore,
+            projectDefaults: projectDefaults, instructionsModel: instructionsModel,
+            configurationModel: configurationModel, skillsModel: skillsModel,
+            detectInstalledAgents: detectInstalledAgents, settingsStore: settingsStore)
+        environment.$sessions.sink { [weak self] sessions in
+            self?.sessions = sessions
+            if let key = self?.selectedSessionKey, !sessions.contains(where: { $0.key == key }) {
+                self?.selectedSessionKey = nil
+            }
+        }.store(in: &environmentObservations)
+        environment.$isRefreshingSessions.sink { [weak self] in self?.isRefreshingSessions = $0 }.store(in: &environmentObservations)
+        environment.$lastSessionRefresh.sink { [weak self] in self?.lastSessionRefresh = $0 }.store(in: &environmentObservations)
+        environment.$lastScanError.sink { [weak self] in self?.lastScanError = $0 }.store(in: &environmentObservations)
     }
 
     func openLibrarySession(_ entry: LibrarySession) {
@@ -172,34 +252,11 @@ final class PanelModel: ObservableObject {
         tab = .sessions
     }
 
-    func start() {
-        started = true
-        agentSelection.refresh()
-        library.load()
-        projects.load()
-        notifier.start()
-        // Cleanup needs every live root for ownership checks, even roots hidden by the UI scope.
-        env.sessionsProvider = { [weak self] in self?.allScannedSessions ?? [] }
-        env.startSampling()
-        refreshSessions()
-        diskTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshSessions() }
-        }
-    }
+    func start() { environment.start() }
+    func stop() { environment.stop() }
+    func refreshSessions() { environment.refreshSessions() }
 
-    func stop() {
-        started = false
-        sessionRescanRequested = false
-        diskTimer?.invalidate()
-        scanTask?.cancel()
-        library.cancelImport()
-        chat.stop()
-        agentWorkspace.skills.cancel()
-        env.stop()
-    }
-
-    /// Activate the already-running client only; never start a terminal or copy a resume command.
-    func openClient(_ session: Session, activate: (SessionClient) -> Bool = { client in
+    func openClient(_ session: Session, activate: @escaping (SessionClient) -> Bool = { client in
         let path = URL(fileURLWithPath: client.bundlePath).resolvingSymlinksInPath()
         guard let app = NSWorkspace.shared.runningApplications.first(where: {
             $0.bundleURL?.resolvingSymlinksInPath() == path
@@ -209,55 +266,6 @@ final class PanelModel: ObservableObject {
            NSWorkspace.shared.open(pane) { return true }
         return app.activate(options: [])
     }) -> String? {
-        guard agentSelection.manages(session.agent.rawValue), session.isProcessAlive, var client = session.client else { return nil }
-        if client.paneURL != nil {
-            let table = LibprocProcessTable()
-            guard let pid = session.pid, let start = session.pidStartTime,
-                  let process = table.record(for: pid), process.startTime == start else {
-                return L10n.t("Could not activate %@. The client may have closed.", client.name)
-            }
-            // The shell or its registration can change between the scan and the click.
-            guard let current = SessionClient.detect(for: process, record: table.record(for:)),
-                  current.bundlePath == client.bundlePath else {
-                return L10n.t("Could not activate %@. The client may have closed.", client.name)
-            }
-            client = current
-        }
-        return activate(client) ? nil : L10n.t("Could not activate %@. The client may have closed.", client.name)
-    }
-
-    func refreshSessions() {
-        guard !isRefreshingSessions else { sessionRescanRequested = true; return }
-        isRefreshingSessions = true
-        let ids = lastAppliedAgentIDs ?? agentSelection.state.managedIDs
-        let scanners = scanners.filter { ids.contains($0.agent.rawValue) }
-        let store = sessionStore
-        scanTask = Task { [weak self] in
-            let scan = await Task.detached(priority: .utility) {
-                var transcripts: [Session] = []
-                for scanner in scanners {
-                    if let found = try? scanner.scan() { transcripts += found }
-                }
-                let processes = ids.isEmpty ? [] : AgentProcessScanner().scan()
-                var list = store.refresh(transcripts: transcripts, processes: processes)
-                    .filter { $0.state != .ended }
-                var branches: [String: String] = [:]
-                for cwd in Set(list.filter { ids.contains($0.agent.rawValue) }.map(\.cwd)) { branches[cwd] = SessionInsights.branch(cwd: cwd) }
-                for index in list.indices { list[index].branch = branches[list[index].cwd] }
-                return (list: list, transcripts: transcripts)
-            }.value
-            guard let self else { return }
-            isRefreshingSessions = false
-            guard !Task.isCancelled else { return }
-            allScannedSessions = scan.list
-            let currentIDs = agentSelection.state.managedIDs
-            let list = scan.list.filter { currentIDs.contains($0.agent.rawValue) }
-            sessions = list
-            library.observe(transcripts: scan.transcripts.filter { currentIDs.contains($0.agent.rawValue) }, live: list)
-            lastSessionRefresh = Date()
-            let quiet = activityMonitor.newlyQuiet(list, now: Date())
-            if !quiet.isEmpty { notifier.notifyQuiet(quiet) }
-            if sessionRescanRequested { sessionRescanRequested = false; refreshSessions() }
-        }
+        environment.openClient(session, activate: activate)
     }
 }

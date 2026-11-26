@@ -28,7 +28,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
 }
 
-/// 设置连续排列；侧栏负责锚点跳转，滚动位置负责同步选中项。
+/// 设置连续排列；顶部菜单跳转分区，滚动位置同步选中项。
 /// 和主面板同一套语言——灰底、白卡片、发丝线、一个强调色。
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
@@ -37,8 +37,22 @@ struct SettingsView: View {
     @State private var webhookResult: String?
 
     var body: some View {
-        AnchoredSettingsScroll(sections: SettingsSection.allCases, selection: $model.settingsSection,
-                               scrollRequest: model.settingsScrollRequest, raisedSection: .interface, content: sectionContent)
+        VStack(spacing: 0) {
+            HStack(spacing: T.s3) {
+                Text(L10n.t("Settings"))
+                    .font(.title3.weight(.semibold))
+                Spacer(minLength: 0)
+                InlineSelect(items: SettingsSection.allCases, label: { $0.title },
+                             header: L10n.t("Jump to"),
+                             selection: Binding(get: { model.settingsSection },
+                                                set: { model.showSettings($0) }))
+            }
+            .padding(.horizontal, T.s4)
+            .padding(.vertical, T.s3)
+            Hairline()
+            AnchoredSettingsScroll(sections: SettingsSection.allCases, selection: $model.settingsSection,
+                                   scrollRequest: model.settingsScrollRequest, raisedSection: .interface, content: sectionContent)
+        }
     }
 
     @ViewBuilder private func sectionContent(_ section: SettingsSection) -> some View {
@@ -144,7 +158,7 @@ struct SettingsView: View {
                 }
                 Hairline()
                 SettingsRow(label: L10n.t("Comfortable layout"),
-                            hint: L10n.t("Larger text and roomier rows.")) {
+                            hint: L10n.t("Roomier rows and controls.")) {
                     MiniSwitch(isOn: $store.comfortableLayout)
                 }
                 Hairline()
@@ -357,7 +371,7 @@ struct TabOrderChips: View {
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(T.faint)
             Text(tab.title)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(T.seg.weight(.medium))
                 .foregroundStyle(dragging == tab ? T.fg : T.fg2)
         }
         .padding(.horizontal, 8)

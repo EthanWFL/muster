@@ -261,7 +261,7 @@ private struct ChatEditor: NSViewRepresentable {
             view.string = text
             view.needsDisplay = true
         }
-        view.font = .systemFont(ofSize: SettingsStore.shared.comfortableLayout ? 14 : 12.5)
+        view.font = .preferredFont(forTextStyle: .body)
         view.textColor = NSColor(T.fg)
         view.insertionPointColor = NSColor(T.fg)
         view.isEditable = enabled

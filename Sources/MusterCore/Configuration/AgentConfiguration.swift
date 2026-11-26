@@ -4,18 +4,18 @@ public struct AgentConfiguration: Identifiable, Equatable, Hashable {
     public let id: String
     public let name: String
     public let path: String
-    public var editable: Bool { AgentRegistry.agent(id)?.editableConfiguration ?? false }
-    public var providerKey: String { AgentRegistry.agent(id)?.providerKey ?? "model_provider" }
-    public var modelKey: String { AgentRegistry.agent(id)?.modelKey ?? "model" }
+    public var editable: Bool { AgentRegistry.configurationSources.first { $0.id == id }?.configurationIsEditable ?? false }
+    public var providerKey: String { AgentRegistry.configurationSources.first { $0.id == id }?.configurationProviderKey ?? "model_provider" }
+    public var modelKey: String { AgentRegistry.configurationSources.first { $0.id == id }?.configurationModelKey ?? "model" }
 
     public static func detect(home: String = NSHomeDirectory(),
                               environment: [String: String] = ProcessInfo.processInfo.environment,
                               exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> [Self] {
-        AgentRegistry.all.sorted { $0.configurationOrder < $1.configurationOrder }.compactMap { agent in
-            guard let location = agent.configuration else { return nil }
+        AgentRegistry.configurationSources.sorted { $0.configurationOrder < $1.configurationOrder }.compactMap { source in
+            guard let location = source.configurationLocation else { return nil }
             let path = location.resolve(home: home, environment: environment)
             guard exists(path) else { return nil }
-            return Self(id: agent.id, name: agent.name, path: path)
+            return Self(id: source.id, name: AgentRegistry.agent(source.id)?.name ?? source.id, path: path)
         }
     }
 }

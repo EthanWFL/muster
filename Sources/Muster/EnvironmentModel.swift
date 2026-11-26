@@ -26,7 +26,7 @@ final class EnvironmentModel: ObservableObject {
     private var scopeRevision = 0
     private var managedAgentIDs: Set<String>?
 
-    /// 由 `PanelModel` 注入，避免两边各存一份会话
+    /// 由 `AppEnvironment` 注入，避免两边各存一份会话
     var sessionsProvider: @MainActor () -> [Session] = { [] }
 
     private let runner: CommandRunner

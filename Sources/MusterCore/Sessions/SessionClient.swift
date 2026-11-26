@@ -11,15 +11,6 @@ public struct SessionClient: Equatable, Sendable {
         self.bundlePath = bundlePath
     }
 
-    private static let names: [String: String] = [
-        "Warp.app": "Warp", "WarpPreview.app": "Warp Preview",
-        "Terminal.app": "Terminal", "iTerm.app": "iTerm", "iTerm2.app": "iTerm2",
-        "Codex.app": "Codex", "ChatGPT.app": "ChatGPT", "Claude.app": "Claude",
-        "Visual Studio Code.app": "VS Code", "Visual Studio Code - Insiders.app": "VS Code Insiders",
-        "Cursor.app": "Cursor", "DeepSeek Harness.app": "DeepSeek Harness", "magpie.app": "Magpie",
-        "Ghostty.app": "Ghostty", "Alacritty.app": "Alacritty", "kitty.app": "Kitty", "WezTerm.app": "WezTerm"
-    ]
-
     public static func detect(for process: ProcessRecord, warpPaneDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Muster/warp-panes"), record: (Int32) -> ProcessRecord?) -> SessionClient? {
         var shells: [ProcessIdentity] = []
         var child = process
@@ -59,7 +50,7 @@ public struct SessionClient: Equatable, Sendable {
         guard path.hasPrefix("/") else { return nil }
         let components = (path as NSString).pathComponents
         for index in components.indices {
-            guard let name = names[components[index]], index + 3 < components.count,
+            guard let name = ClientHostRegistry.name(forApplication: components[index]), index + 3 < components.count,
                   components[index + 1] == "Contents",
                   ["MacOS", "Frameworks"].contains(components[index + 2]) else { continue }
             // Resources may contain a standalone Agent binary; that alone is not host evidence.

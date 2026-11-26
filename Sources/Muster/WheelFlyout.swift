@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct WheelFlyout: View {
@@ -9,7 +10,10 @@ struct WheelFlyout: View {
     private struct Row {
         let label: String
         var help: String?
+        var symbol = "circle"
         var isLink = false
+        var path: String?
+        var link: URL?
         let action: () -> Void
     }
 
@@ -17,32 +21,36 @@ struct WheelFlyout: View {
         switch module {
         case .projects:
             guard !wheel.visibleEntries.isEmpty else {
-                return [Row(label: L10n.t("Wheel configuration"), action: wheel.openConfiguration)]
+                return [Row(label: L10n.t("Wheel configuration"), symbol: "gearshape", action: wheel.openConfiguration)]
             }
             return wheel.visibleEntries.map { entry in
-                Row(label: entry.name, help: entry.id) { wheel.open(entry) }
+                Row(label: entry.name, help: entry.id, symbol: "folder", path: entry.id) { wheel.open(entry) }
             }
         case .websites where !preferences.websites.isEmpty:
             return preferences.websites.map { url in
-                Row(label: url.host ?? url.absoluteString) { wheel.openWebsite(url) }
+                Row(label: url.host ?? url.absoluteString, help: url.absoluteString, symbol: "globe", link: url) {
+                    wheel.openWebsite(url)
+                }
             }
         case .clipboard where !preferences.clips.isEmpty:
             return preferences.clips.map { text in
                 let preview = Self.clipPreview(text)
-                return Row(label: preview.label, isLink: preview.isLink) {
+                return Row(label: preview.label, help: text, symbol: preview.isLink ? "link" : "doc.on.doc",
+                           isLink: preview.isLink) {
                     preferences.restore(text)
                     wheel.collapse()
                 }
             }
         case .actions:
-            return [Row(label: L10n.t("Chat")) { wheel.openPage(.chat) },
-                    Row(label: L10n.t("Wheel configuration"), action: wheel.openConfiguration),
-                    Row(label: L10n.t("Hide wheel"), action: wheel.toggle)]
+            return [Row(label: L10n.t("Chat"), symbol: "bubble.left") { wheel.openPage(.chat) },
+                    Row(label: L10n.t("Wheel configuration"), symbol: ProjectWheelToggle.symbol,
+                        action: wheel.openConfiguration),
+                    Row(label: L10n.t("Hide wheel"), symbol: "eye.slash", action: wheel.toggle)]
         case .clipboard:
             let label = preferences.recording ? "No copied text yet" : "Enable clipboard history…"
-            return [Row(label: L10n.t(label), action: wheel.openConfiguration)]
+            return [Row(label: L10n.t(label), symbol: "clipboard", action: wheel.openConfiguration)]
         case .websites:
-            return [Row(label: L10n.t("Add website"), action: wheel.openConfiguration)]
+            return [Row(label: L10n.t("Add website"), symbol: "plus", action: wheel.openConfiguration)]
         }
     }
 
@@ -65,25 +73,39 @@ struct WheelFlyout: View {
         let values = rows
         let font = NSFont.systemFont(ofSize: 12)
         let width = values.map { ($0.label as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        return CGSize(width: min(ceil(width) + 24, module == .websites ? 142 : 208), height: CGFloat(values.count * 23 + 8))
+        return CGSize(width: min(ceil(width) + 44, module == .websites ? 176 : 244),
+                      height: CGFloat(values.count * 28 + 8 + 23))
     }
 
     var body: some View {
         let values = rows
         let size = popupSize
         VStack(alignment: .leading, spacing: 0) {
+            Text(module.title)
+                .font(T.section)
+                .foregroundStyle(T.muted)
+                .padding(.horizontal, 7)
+                .frame(height: 22, alignment: .leading)
+            Hairline()
             ForEach(values.indices, id: \.self) { index in
-                Button(action: values[index].action) {
-                    Text(verbatim: values[index].label).lineLimit(1).truncationMode(values[index].isLink ? .middle : .tail)
-                        .foregroundStyle(hovered == index ? T.accent : T.fg)
-                        .padding(.horizontal, 7).frame(maxWidth: .infinity, alignment: .leading).frame(height: 23)
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                    .help(values[index].help ?? values[index].label)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(hovered == index ? T.accentSoft : .clear))
-                    .onHover { inside in if inside { hovered = index } else if hovered == index { hovered = nil } }
+                if values[index].path != nil || values[index].link != nil {
+                    rowButton(index, values[index])
+                        .contextMenu {
+                            if let path = values[index].path {
+                                Button(L10n.t("Reveal in Finder")) {
+                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                                }
+                                Button(L10n.t("Copy path")) { copy(path) }
+                            }
+                            if let link = values[index].link {
+                                Button(L10n.t("Copy link")) { copy(link.absoluteString) }
+                            }
+                        }
+                } else {
+                    rowButton(index, values[index])
+                }
             }
-        }.padding(4).font(.system(size: 12)).foregroundStyle(T.fg)
+        }.padding(4).font(T.seg).foregroundStyle(T.fg)
         .frame(width: size.width, height: size.height)
         .background(RoundedRectangle(cornerRadius: 7).fill(T.card))
         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(T.line, lineWidth: 1))
@@ -92,5 +114,36 @@ struct WheelFlyout: View {
             wheel.track(inside)
         }
         .onChange(of: size) { _, _ in DispatchQueue.main.async { wheel.positionFlyout() } }
+    }
+
+    @ViewBuilder private func rowButton(_ index: Int, _ row: Row) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 7) {
+                Image(systemName: row.symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(hovered == index ? T.accent : T.muted)
+                    .frame(width: 14)
+                    .accessibilityHidden(true)
+                Text(verbatim: row.label)
+                    .lineLimit(1)
+                    .truncationMode(row.isLink ? .middle : .tail)
+                    .foregroundStyle(hovered == index ? T.accent : T.fg)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(row.help ?? row.label)
+        .background(RoundedRectangle(cornerRadius: 4).fill(hovered == index ? T.accentSoft : .clear))
+        .onHover { inside in if inside { hovered = index } else if hovered == index { hovered = nil } }
+    }
+
+    private func copy(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
     }
 }

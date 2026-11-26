@@ -11,12 +11,14 @@ public enum AgentInstallation {
                               executableDirectories: [String]? = nil, applicationDirectories: [String]? = nil) -> [AgentDescriptor] {
         let binaries = executableDirectories ?? searchDirectories(home: home, environment: environment)
         let applications = applicationDirectories ?? ["/Applications", home + "/Applications"]
-        return AgentRegistry.all.filter { agent in
-            executablePath(for: agent, directories: binaries) != nil || applicationPath(for: agent, directories: applications) != nil
+        return AgentRegistry.processSources.compactMap { source in
+            guard executablePath(for: source, directories: binaries) != nil
+                || applicationPath(for: source, directories: applications) != nil else { return nil }
+            return AgentRegistry.agent(source.id)
         }
     }
 
-    static func executablePath(for agent: AgentDescriptor, directories: [String]) -> String? {
+    static func executablePath(for agent: any AgentProcessSource, directories: [String]) -> String? {
         let fm = FileManager.default
         for name in agent.executables + agent.installationExecutables {
             for directory in directories where directory.hasPrefix("/") {
@@ -28,7 +30,7 @@ public enum AgentInstallation {
         return nil
     }
 
-    private static func applicationPath(for agent: AgentDescriptor, directories: [String]) -> String? {
+    private static func applicationPath(for agent: any AgentProcessSource, directories: [String]) -> String? {
         let fm = FileManager.default
         for candidate in agent.applications {
             for directory in directories where directory.hasPrefix("/") {

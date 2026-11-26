@@ -787,3 +787,31 @@
 "OpenAI is rate limiting requests. Try again shortly." = "OpenAI is rate limiting requests. Try again shortly.";
 "The OpenAI response ended before it was complete." = "The OpenAI response ended before it was complete.";
 "OpenAI could not complete the request. Try again shortly." = "OpenAI could not complete the request. Try again shortly.";
+
+"Open projects with" = "Open projects with";
+"Open websites with" = "Open websites with";
+"Move earlier" = "Move earlier";
+"Move later" = "Move later";
+"Open with" = "Open with";
+"The selected project app is not installed. Opened with the system default." = "The selected project app is not installed. Opened with the system default.";
+"The selected browser is not installed. Opened with the system default." = "The selected browser is not installed. Opened with the system default.";
+"Session scan" = "Session scan";
+"Session scan failed" = "Session scan failed";
+"Try again" = "Try again";
+"Scanning sessions…" = "Scanning sessions…";
+"Reading local Agent transcripts." = "Reading local Agent transcripts.";
+"Quit Muster?" = "Quit Muster?";
+"Unsaved changes in: %@. Quit anyway?" = "Unsaved changes in: %@. Quit anyway?";
+"Quit Anyway" = "Quit Anyway";
+"Session details" = "Session details";
+"Instructions" = "Instructions";
+"Skill draft" = "Skill draft";
+"Roomier rows and controls." = "Roomier rows and controls.";
+"System default" = "System default";
+
+"Jump to" = "Jump to";
+
+"Reset position" = "Reset position";
+"Click to open · Drag to move." = "Click to open · Drag to move.";
+"Copy path" = "Copy path";
+"Copy link" = "Copy link";

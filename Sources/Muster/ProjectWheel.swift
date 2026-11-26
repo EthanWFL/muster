@@ -26,14 +26,19 @@ final class ProjectWheelController: NSObject, ObservableObject {
     @Published private(set) var expanded = false
     @Published private(set) var entries: [WheelProject] = []
     @Published private(set) var activeModule: WheelModule?
+    @Published private(set) var notice: String?
     let preferences: WheelPreferences
     var onOpenPage: ((PanelModel.ManagementPage) -> Void)?
     @Published var pointerInFlyout = false
     private var lastModulePoint: CGPoint?
     private var flyout: NSPanel?
+    private var noticePanel: NSPanel?
+    private var noticeTask: Task<Void, Never>?
+    private var allEntries: [WheelProject] = []
     private var selectionTask: Task<Void, Never>?
     private var candidate: WheelModule?
     private var preferenceObservation: AnyCancellable?
+    private var orderObservation: AnyCancellable?
     private let defaults: UserDefaults
     private var panel: NSPanel?
     private var anchor: CGPoint = .zero
@@ -43,12 +48,23 @@ final class ProjectWheelController: NSObject, ObservableObject {
     private var press: (mouse: CGPoint, center: CGPoint)?
     private var dragging = false
     private var pendingCollapse: Task<Void, Never>?
+    private var expandTask: Task<Void, Never>?
     private static let positionKey = "MusterProjectWheelCenter"
     nonisolated static let hubSize: CGFloat = 48
     nonisolated static let ringWidth: CGFloat = 34
     nonisolated static let diameter = hubSize + 2 * ringWidth
     @Published private(set) var blinkRequest: UUID?
     var visibleEntries: ArraySlice<WheelProject> { entries.prefix(6) }
+
+    private func recomputeEntries(order: [String]? = nil) {
+        let order = order ?? preferences.projectOrder
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        entries = allEntries.sorted {
+            let lhs = rank[$0.id] ?? Int.max
+            let rhs = rank[$1.id] ?? Int.max
+            return lhs != rhs ? lhs < rhs : $0.id < $1.id
+        }
+    }
 
     init(projects: ProjectsModel, defaults: UserDefaults, board: NSPasteboard = .general) {
         self.defaults = defaults
@@ -57,18 +73,35 @@ final class ProjectWheelController: NSObject, ObservableObject {
         preferenceObservation = preferences.$modules.dropFirst().sink { [weak self] _ in self?.collapse() }
         observation = projects.$projects.map { projects in
             projects.filter { $0.record?.wheelMember == true }
-                .map { WheelProject(id: $0.path, name: $0.name) }.sorted { $0.id < $1.id }
+                .map { WheelProject(id: $0.path, name: $0.name) }
         }.removeDuplicates().sink { [weak self] entries in
             guard let self else { return }
-            self.entries = entries
+            self.allEntries = entries
+            self.preferences.reconcileProjects(entries.map(\.id))
+            self.recomputeEntries()
+        }
+        orderObservation = preferences.$projectOrder.sink { [weak self] order in
+            self?.recomputeEntries(order: order)
         }
         NotificationCenter.default.addObserver(self, selector: #selector(screenChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     func toggle() {
         if isVisible {
             pendingCollapse?.cancel()
+            expandTask?.cancel()
+            noticeTask?.cancel()
+            noticePanel?.orderOut(nil)
+            noticePanel = nil
+            notice = nil
             resetModule()
             panel?.orderOut(nil)
             panel?.contentView = nil
@@ -117,6 +150,14 @@ final class ProjectWheelController: NSObject, ObservableObject {
 
     @objc private func screenChanged() { if isVisible { layout() } }
 
+    /// Leaving Muster for another app should put the ring away; the hub stays.
+    @objc private func applicationActivated(_ notification: Notification) {
+        guard isVisible else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        collapse()
+    }
+
     private func layout() {
         guard let screen = screen(at: anchor) else { return }
         let area = screen.visibleFrame
@@ -129,11 +170,28 @@ final class ProjectWheelController: NSObject, ObservableObject {
         positionFlyout()
     }
 
+    /// Hovering only expands after a short dwell, so passing over the hub is harmless.
+    func hoverHub(_ inside: Bool) {
+        expandTask?.cancel()
+        guard inside, isVisible, !expanded, press == nil else { return }
+        hoverModule(nil)
+        expandTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(160))
+            guard !Task.isCancelled else { return }
+            self?.enteredHub()
+        }
+    }
+
     func enteredHub() {
+        expandTask?.cancel()
         pendingCollapse?.cancel()
         guard isVisible, !expanded, press == nil else { return }
         expanded = true
         layout()
+    }
+
+    func toggleExpanded() {
+        if expanded { collapse() } else { enteredHub() }
     }
 
     func track(_ inside: Bool) {
@@ -151,6 +209,7 @@ final class ProjectWheelController: NSObject, ObservableObject {
 
     func collapse() {
         resetModule()
+        expandTask?.cancel()
         pendingCollapse?.cancel()
         expanded = false
         layout()
@@ -162,7 +221,7 @@ final class ProjectWheelController: NSObject, ObservableObject {
         guard let press else { return }
         let dx = mouse.x - press.mouse.x, dy = mouse.y - press.mouse.y
         guard dragging || hypot(dx, dy) >= 4 else { return }
-        if !dragging { resetModule() }
+        if !dragging { resetModule(); expandTask?.cancel() }
         dragging = true
         expanded = false
         anchor = CGPoint(x: press.center.x + dx, y: press.center.y + dy)
@@ -175,8 +234,18 @@ final class ProjectWheelController: NSObject, ObservableObject {
             dragging = false
             defaults.set(NSStringFromPoint(anchor), forKey: Self.positionKey)
         } else {
-            enteredHub()
+            // A click is a deterministic expand/collapse, independent of hover.
+            toggleExpanded()
         }
+    }
+
+    func resetPosition() {
+        defaults.removeObject(forKey: Self.positionKey)
+        guard let screen = screen(at: NSEvent.mouseLocation) else { return }
+        anchor = CGPoint(x: screen.visibleFrame.maxX - 60, y: screen.visibleFrame.midY)
+        resetModule()
+        expanded = false
+        if isVisible { layout() }
     }
 
     func open(_ entry: WheelProject) {
@@ -184,16 +253,11 @@ final class ProjectWheelController: NSObject, ObservableObject {
         collapse()
         var directory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: entry.id, isDirectory: &directory), directory.boolValue else {
-            showError(L10n.t("Project folder unavailable: %@", entry.id)); return
+            showNotice(L10n.t("Project folder unavailable: %@", entry.id)); return
         }
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") else {
-            showError(L10n.t("Install Visual Studio Code to open this project.")); return
-        }
-        // Submit the folder itself so VS Code can select an existing matching workspace window.
-        NSWorkspace.shared.open([URL(fileURLWithPath: entry.id, isDirectory: true)], withApplicationAt: app,
-                                configuration: NSWorkspace.OpenConfiguration()) { _, error in
-            if let error { Task { @MainActor in self.showError(error.localizedDescription) } }
-        }
+        openURL(URL(fileURLWithPath: entry.id, isDirectory: true),
+                bundleID: preferences.projectOpener,
+                missingApp: L10n.t("The selected project app is not installed. Opened with the system default."))
     }
 
     private func resetModule() {
@@ -294,19 +358,68 @@ final class ProjectWheelController: NSObject, ObservableObject {
 
     func openWebsite(_ url: URL) {
         collapse()
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") else {
-            showError(L10n.t("Install Google Chrome to open websites.")); return
+        openURL(url, bundleID: preferences.websiteOpener,
+                missingApp: L10n.t("The selected browser is not installed. Opened with the system default."))
+    }
+
+    private func openURL(_ url: URL, bundleID: String, missingApp: String) {
+        guard !bundleID.isEmpty else {
+            NSWorkspace.shared.open(url)
+            return
         }
-        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-            if let error { Task { @MainActor in self.showError(error.localizedDescription) } }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            showNotice(missingApp)
+            NSWorkspace.shared.open(url)
+            return
+        }
+        NSWorkspace.shared.open([url], withApplicationAt: app,
+                                configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
+            if let error { Task { @MainActor in self?.showNotice(error.localizedDescription) } }
         }
     }
 
-    private func showError(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = L10n.t("Project wheel")
-        alert.informativeText = message
-        alert.runModal()
+    private func showNotice(_ message: String) {
+        notice = message
+        noticeTask?.cancel()
+        noticePanel?.orderOut(nil)
+        noticePanel = nil
+
+        guard let disk = panel?.frame, let area = screen(at: anchor)?.visibleFrame else {
+            scheduleNoticeClear()
+            return
+        }
+        let width = min(max((message as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        ]).width + 24, 160), 320)
+        let size = CGSize(width: width, height: 44)
+        let x = min(max(disk.midX - width / 2, area.minX), area.maxX - width)
+        let y = disk.minY - size.height - 8 >= area.minY ? disk.minY - size.height - 8 : disk.maxY + 8
+
+        let popup = NSPanel(contentRect: CGRect(origin: CGPoint(x: x, y: y), size: size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        popup.isReleasedWhenClosed = false
+        popup.isOpaque = false
+        popup.backgroundColor = .clear
+        popup.hasShadow = true
+        popup.level = .floating
+        popup.hidesOnDeactivate = false
+        popup.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let host = NSHostingView(rootView: WheelNotice(message: message).frame(width: size.width, height: size.height))
+        host.sizingOptions = []
+        popup.contentView = host
+        noticePanel = popup
+        popup.orderFrontRegardless()
+        scheduleNoticeClear()
+    }
+
+    private func scheduleNoticeClear() {
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+            self?.noticePanel?.orderOut(nil)
+            self?.noticePanel = nil
+        }
     }
 }
 
@@ -344,18 +457,28 @@ private struct WheelModuleRing: View {
     @ObservedObject var wheel: ProjectWheelController
     @ObservedObject var preferences: WheelPreferences
 
+    /// Angles follow the declaration order, so toggling a module never moves the others.
+    private let slots = WheelModule.allCases
+
     var body: some View {
         let modules = preferences.modules
         ZStack {
             Circle().fill(T.card)
-            ForEach(Array(modules.enumerated()), id: \.element) { index, module in
-                let sector = WheelSector(index: index, count: modules.count)
-                let selected = wheel.activeModule == module
-                sector.fill(selected && !wheel.pointerInFlyout ? T.accentSoft : T.card)
-                sector.stroke(T.line, lineWidth: 1)
-                Image(systemName: module.symbol).font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(selected ? T.accent : T.ctlFg)
-                    .offset(x: 41 * cos(sector.angle), y: 41 * sin(sector.angle))
+            ForEach(modules) { module in
+                if let slot = slots.firstIndex(of: module) {
+                    let sector = WheelSector(index: slot, count: slots.count)
+                    let selected = wheel.activeModule == module
+                    sector.fill(selected && !wheel.pointerInFlyout ? T.accentSoft : T.card)
+                        .contentShape(sector)
+                        .help(module.title)
+                        .pointerCursor()
+                    sector.stroke(T.line, lineWidth: 1)
+                    Image(systemName: module.symbol).font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(selected ? T.accent : T.ctlFg)
+                        .offset(x: 41 * cos(sector.angle), y: 41 * sin(sector.angle))
+                        .help(module.title)
+                        .accessibilityHidden(true)
+                }
             }
             if modules.isEmpty {
                 Button(L10n.t("Wheel configuration"), action: wheel.openConfiguration).font(T.micro).offset(y: 38)
@@ -363,17 +486,26 @@ private struct WheelModuleRing: View {
         }.frame(width: ProjectWheelController.diameter, height: ProjectWheelController.diameter)
         .clipShape(Circle()).contentShape(Circle())
         .onContinuousHover { phase in
-            if case .active(let p) = phase, let i = WheelSector.index(at: p, count: modules.count) {
-                wheel.hoverModule(modules[i])
+            if case .active(let point) = phase, let module = module(at: point, modules: modules) {
+                wheel.hoverModule(module)
             } else { wheel.hoverModule(nil) }
         }
-        .onTapGesture(coordinateSpace: .local) { p in
-            if let i = WheelSector.index(at: p, count: modules.count) { wheel.activateModule(modules[i]) }
-            else if modules.isEmpty { wheel.openConfiguration() }
+        .onTapGesture(coordinateSpace: .local) { point in
+            if let module = module(at: point, modules: modules) {
+                wheel.activateModule(module)
+            } else if modules.isEmpty {
+                wheel.openConfiguration()
+            }
         }
         .accessibilityRepresentation {
             ForEach(modules) { module in Button(module.title) { wheel.activateModule(module) } }
         }
+    }
+
+    private func module(at point: CGPoint, modules: [WheelModule]) -> WheelModule? {
+        guard let slot = WheelSector.index(at: point, count: slots.count),
+              slots.indices.contains(slot), modules.contains(slots[slot]) else { return nil }
+        return slots[slot]
     }
 }
 
@@ -416,14 +548,21 @@ private struct ProjectWheelFace: View {
             if wheel.expanded { WheelModuleRing(wheel: wheel, preferences: wheel.preferences) }
             ZStack {
                 Circle().fill(T.card)
-                Circle().strokeBorder(AngularGradient(colors: [.cyan, .indigo, .pink, .cyan], center: .center), lineWidth: 3)
-                Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.6)
+                Circle().strokeBorder(AngularGradient(colors: [T.accent, T.accent.opacity(0.55), T.accent], center: .center), lineWidth: 3)
+                Circle().strokeBorder(T.line, lineWidth: 0.6)
                 panda.frame(width: 28, height: 28).accessibilityHidden(true)
             }.frame(width: ProjectWheelController.hubSize, height: ProjectWheelController.hubSize).contentShape(Circle())
-            .onHover { if $0 { wheel.hoverModule(nil); wheel.enteredHub() } }
+            .pointerCursor()
+            .onHover { wheel.hoverHub($0) }
             .gesture(DragGesture(minimumDistance: 0).onChanged { _ in wheel.dragChanged() }.onEnded { _ in wheel.dragEnded() })
+            .contextMenu {
+                Button(L10n.t("Wheel configuration")) { wheel.openConfiguration() }
+                Button(L10n.t(wheel.isVisible ? "Hide wheel" : "Start wheel")) { wheel.toggle() }
+                Divider()
+                Button(L10n.t("Reset position")) { wheel.resetPosition() }
+            }
             .accessibilityLabel(L10n.t("Project wheel"))
-            .help(L10n.t("Drag to move the wheel."))
+            .help(L10n.t("Click to open · Drag to move."))
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
         .onHover { wheel.track($0) }
         .task(id: wheel.blinkRequest) {
@@ -436,5 +575,22 @@ private struct ProjectWheelFace: View {
             blinkFrame = nil
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: wheel.expanded)
+    }
+}
+
+private struct WheelNotice: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(T.micro)
+            .foregroundStyle(T.red)
+            .multilineTextAlignment(.leading)
+            .lineLimit(2)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: T.r).fill(T.card))
+            .overlay(RoundedRectangle(cornerRadius: T.r).strokeBorder(T.line, lineWidth: 1))
     }
 }

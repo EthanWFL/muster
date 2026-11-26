@@ -231,14 +231,14 @@ private struct SessionLibraryRow: View {
                 SessionClientButton(session: entry.session)
             }
             Text(entry.session.cwd.isEmpty ? L10n.t("Unknown project") : (entry.session.cwd as NSString).abbreviatingWithTildeInPath)
-                .font(T.monoMicro).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                .font(T.monoMicro).foregroundStyle(T.muted).lineLimit(1).truncationMode(.middle)
             HStack {
                 Text(entry.session.agent.displayName)
                 Text("·")
                 Text(L10n.t(entry.session.isProcessAlive ? "Process present" : "History record"))
                 Spacer(minLength: 0)
                 Text(entry.session.lastActivityAt, style: .relative)
-            }.font(T.micro).foregroundStyle(.secondary).lineLimit(1)
+            }.font(T.micro).foregroundStyle(T.muted).lineLimit(1)
         }
         .padding(.vertical, 4).contentShape(Rectangle())
         .help(entry.displayTitle + "\n" + entry.session.cwd)
@@ -298,7 +298,7 @@ private struct SessionLibraryDetail: View {
     private func heading(_ entry: LibrarySession) -> some View {
         VStack(alignment: .leading, spacing: T.s2) {
             HStack(alignment: .top) {
-                Text(entry.displayTitle).font(.system(size: 19, weight: .semibold)).textSelection(.enabled)
+                Text(entry.displayTitle).font(.title3.weight(.semibold)).textSelection(.enabled)
                 Spacer(minLength: T.s2)
                 SessionClientButton(session: entry.session)
             }

@@ -52,7 +52,7 @@ struct SkillReadView: View {
                 ForEach(Array(Self.blocks(text, stripMetadata: stripMetadata).enumerated()), id: \.offset) { _, block in
                     switch block.kind {
                     case .heading(let depth):
-                        Text(inline(block.text)).font(.system(size: depth == 1 ? 21 : (depth == 2 ? 17 : 14), weight: .semibold))
+                        Text(inline(block.text)).font(depth == 1 ? .title2.weight(.semibold) : (depth == 2 ? .title3.weight(.semibold) : .body.weight(.semibold)))
                             .padding(.top, T.s2)
                     case .code:
                         ScrollView(.horizontal) {

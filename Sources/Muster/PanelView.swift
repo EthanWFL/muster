@@ -55,15 +55,21 @@ struct PanelView: View {
                 Hairline()
             }
             Group {
-                if isShowingSettings {
-                    SettingsView(store: settings, model: model)
-                } else if presentation == .window && model.managementPage == .chat {
-                    ChatView(chat: model.chat, panel: model, settings: settings)
-                } else if presentation == .window && model.managementPage == .wheel {
-                    WheelConfigurationView(projects: model.projects, preferences: model.projects.wheel.preferences,
-                                           section: $model.wheelSection, scrollRequest: model.wheelScrollRequest)
+                if presentation == .popover {
+                    // The popover is a quick surface; management pages open in the window.
+                    workspaceContent(model.tab)
                 } else {
-                    tabs
+                    switch model.destination {
+                    case .settings:
+                        SettingsView(store: settings, model: model)
+                    case .chat:
+                        ChatView(chat: model.chat, panel: model, settings: settings)
+                    case .wheel:
+                        WheelConfigurationView(projects: model.projects, wheel: model.projects.wheel,
+                                               section: $model.wheelSection, scrollRequest: model.wheelScrollRequest)
+                    case .workspace(let tab):
+                        workspaceContent(tab)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -80,7 +86,7 @@ struct PanelView: View {
         HStack(spacing: T.s2) {
             BrandMark(isPanelOpen: surface.isVisible)
             Text("Muster")
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(T.seg.weight(.semibold))
                 .foregroundStyle(T.fg)
             Spacer(minLength: T.s2)
             PanelHeaderActions(model: model, presentation: presentation,
@@ -90,7 +96,7 @@ struct PanelView: View {
         .frame(height: 40)
     }
 
-    @ViewBuilder private var tabs: some View {
+    @ViewBuilder private func workspaceContent(_ tab: PanelModel.Tab) -> some View {
         VStack(spacing: 0) {
             if presentation == .popover {
                 SegmentedTabs(selection: $model.tab, tabs: model.orderedTabs)
@@ -99,12 +105,13 @@ struct PanelView: View {
                     .padding(.bottom, T.s2)
                 Hairline()
             }
-            if model.tab == .projects {
+            switch tab {
+            case .projects:
                 ProjectsView(model: model, projects: model.projects, library: model.library,
                              onOpenWindow: onOpenWindow)
-            } else if model.tab == .agent {
+            case .agent:
                 AgentWorkspaceView(workspace: model.agentWorkspace, onOpenWindow: onOpenWindow)
-            } else if model.tab == .sessions {
+            case .sessions:
                 if presentation == .window {
                     SessionLibraryView(model: model, library: model.library)
                         .modifier(SessionClientActions(model: model))
@@ -112,16 +119,11 @@ struct PanelView: View {
                     SessionsView(model: model, library: model.library, onOpenLibrary: onOpenWindow)
                         .modifier(SessionClientActions(model: model))
                 }
-            } else {
+            case .environment:
                 ScrollView(.vertical) {
-                    Group {
-                        switch model.tab {
-                        case .sessions, .projects, .agent: EmptyView()
-                        case .environment: EnvironmentView(model: model, env: model.env, visibilityOwner: surfaceID)
-                        }
-                    }
-                    .padding(presentation == .window ? T.s4 : T.s2)
-                    .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
+                    EnvironmentView(model: model, env: model.env, visibilityOwner: surfaceID)
+                        .padding(presentation == .window ? T.s4 : T.s2)
+                        .frame(maxWidth: .infinity, minHeight: 240, alignment: .top)
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 .scrollIndicators(.visible)
@@ -139,23 +141,29 @@ struct PanelView: View {
                 Text(date, style: .relative).font(T.small).foregroundStyle(T.muted)
             }
             Spacer(minLength: T.s2)
-            if let onClose, presentation == .window {
-                Button(action: onClose) { ShortcutLabel(title: L10n.t("Close"), glyph: "⌘W") }
-                    .buttonStyle(PillButtonStyle(kind: .quiet))
-                    .keyboardShortcut("w")
+            if presentation == .window {
+                if let onClose {
+                    Button(action: onClose) { ShortcutLabel(title: L10n.t("Close"), glyph: "⌘W") }
+                        .buttonStyle(PillButtonStyle(kind: .quiet))
+                        .keyboardShortcut("w")
+                }
+                Button { NSApplication.shared.terminate(nil) } label: {
+                    ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q")
+                }
+                .buttonStyle(PillButtonStyle(kind: .quiet))
+                .keyboardShortcut("q")
             }
             ProjectWheelToggle(wheel: model.projects.wheel)
-            Button { NSApplication.shared.terminate(nil) } label: {
-                ShortcutLabel(title: L10n.t("Quit"), glyph: "⌘Q")
-            }
-            .buttonStyle(PillButtonStyle(kind: .quiet))
-            .keyboardShortcut("q")
         }
         .padding(.horizontal, T.s2)
         .frame(height: 40)
     }
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        if presentation == .popover, press.modifiers == .command, press.key == "q" {
+            NSApplication.shared.terminate(nil)
+            return .handled
+        }
         if press.modifiers == .command, let number = Int(press.characters),
            model.orderedTabs.indices.contains(number - 1) {
             if presentation == .window { model.showsSettings = false }
@@ -176,25 +184,45 @@ struct PanelHeaderActions: View {
     var presentation: PanelPresentation = .popover
     var onOpenWindow: (() -> Void)? = nil
     var onOpenSettings: (() -> Void)? = nil
-    @ObservedObject private var settings = SettingsStore.shared
     private var isShowingSettings: Bool { presentation == .window && model.showsSettings }
+
+    private enum SearchScope {
+        case projects, skills, sessions
+
+        var help: String {
+            switch self {
+            case .projects: return L10n.t("Search projects · ⌘F")
+            case .skills: return L10n.t("Search skills · ⌘F")
+            case .sessions: return L10n.t("Search sessions · ⌘F")
+            }
+        }
+    }
+
+    /// ⌘F belongs to the visible page; settings, chat and the wheel have no search field.
+    private var searchScope: SearchScope? {
+        guard !isShowingSettings else { return nil }
+        if presentation == .popover {
+            switch model.tab {
+            case .projects: return .projects
+            case .agent: return .skills
+            case .sessions: return .sessions
+            case .environment: return nil
+            }
+        }
+        switch model.destination {
+        case .workspace(.projects): return .projects
+        case .workspace(.agent): return .skills
+        case .workspace(.sessions): return .sessions
+        case .workspace(.environment), .chat, .wheel, .settings: return nil
+        }
+    }
 
     var body: some View {
         HStack(spacing: T.s2) {
-            iconButton("magnifyingglass", help: searchHelp, shortcut: "f") {
-                if presentation == .window && (model.managementPage == .wheel || model.managementPage == .chat) {
-                    model.focusSessionSearch()
-                    return
+            if let scope = searchScope {
+                iconButton("magnifyingglass", help: scope.help, shortcut: "f") {
+                    search(scope)
                 }
-                if model.tab == .projects && !isShowingSettings { model.projects.focusSearch() }
-                else if model.tab == .agent && !isShowingSettings {
-                    if presentation == .popover {
-                        model.agentWorkspace.openQuickInWindow(skills: true)
-                        onOpenWindow?()
-                    }
-                    model.agentWorkspace.focusSkills()
-                }
-                else { model.focusSessionSearch(showInManagementWindow: presentation == .window) }
             }
             if let onOpenWindow {
                 iconButton("arrow.up.left.and.arrow.down.right", help: L10n.t("Open management window")) {
@@ -211,12 +239,19 @@ struct PanelHeaderActions: View {
         }
     }
 
-    private var searchHelp: String {
-        if presentation == .popover || model.managementPage == .workspace {
-            if model.tab == .projects { return L10n.t("Search projects · ⌘F") }
-            if model.tab == .agent { return L10n.t("Search skills · ⌘F") }
+    private func search(_ scope: SearchScope) {
+        switch scope {
+        case .projects:
+            model.projects.focusSearch()
+        case .skills:
+            if presentation == .popover {
+                model.agentWorkspace.openQuickInWindow(skills: true)
+                onOpenWindow?()
+            }
+            model.agentWorkspace.focusSkills()
+        case .sessions:
+            model.focusSessionSearch(showInManagementWindow: presentation == .window)
         }
-        return L10n.t("Search sessions · ⌘F")
     }
 
     private func iconButton(
@@ -227,7 +262,7 @@ struct PanelHeaderActions: View {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(T.ctlFg)
-                .frame(width: 24, height: 24)
+                .frame(width: T.iconHitSize, height: T.iconHitSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(InteractivePlainButtonStyle(pressedScale: 0.90))

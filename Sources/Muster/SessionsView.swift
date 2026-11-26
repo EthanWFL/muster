@@ -33,19 +33,28 @@ struct SessionsView: View {
                         onOpenLibrary()
                     } label: {
                         Label(L10n.t("%d need attention", library.pendingCount), systemImage: "flag")
-                    }.buttonStyle(.plain).foregroundStyle(library.pendingCount > 0 ? Color.orange : T.muted)
+                    }.buttonStyle(.plain).foregroundStyle(library.pendingCount > 0 ? T.amber : T.muted)
                 }.font(T.small).padding(.horizontal, T.s3).padding(.top, T.s3)
             }
             searchAndFilters
             Hairline()
             if groups.isEmpty {
                 VStack {
-                    EmptyState(title: hasFilters ? L10n.t("No matching sessions") : L10n.t("No recent sessions"),
-                               message: hasFilters ? L10n.t("Try another project, agent or branch.")
-                                   : L10n.t("Open sessions of installed agents show up here"))
-                    if hasFilters {
-                        Button(L10n.t("Reset filters")) { model.resetSessionFilters(); focus = .search }
+                    if model.isRefreshingSessions {
+                        EmptyState(title: L10n.t("Scanning sessions…"),
+                                   message: L10n.t("Reading local Agent transcripts."))
+                    } else if let error = model.lastScanError {
+                        EmptyState(title: L10n.t("Session scan failed"), message: error)
+                        Button(L10n.t("Try again")) { model.refreshSessions() }
                             .buttonStyle(PillButtonStyle(kind: .secondary))
+                    } else {
+                        EmptyState(title: hasFilters ? L10n.t("No matching sessions") : L10n.t("No recent sessions"),
+                                   message: hasFilters ? L10n.t("Try another project, agent or branch.")
+                                       : L10n.t("Open sessions of installed agents show up here"))
+                        if hasFilters {
+                            Button(L10n.t("Reset filters")) { model.resetSessionFilters(); focus = .search }
+                                .buttonStyle(PillButtonStyle(kind: .secondary))
+                        }
                     }
                     Spacer(minLength: 0)
                 }
@@ -205,14 +214,14 @@ private struct SessionRow: View {
                 }
                 Text(showsAgent ? (session.branch ?? L10n.t("Branch unavailable"))
                      : (session.cwd as NSString).abbreviatingWithTildeInPath + (session.branch.map { " · " + $0 } ?? ""))
-                    .font(T.monoMicro).foregroundStyle(.secondary)
+                    .font(T.monoMicro).foregroundStyle(T.muted)
                     .lineLimit(1).truncationMode(.middle).help(session.cwd)
             }
             Spacer(minLength: T.s2)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(activityLabel).font(T.micro)
                 Text(session.hasTranscript ? session.lastActivityAt : session.startedAt, style: .relative)
-                    .font(T.micro).foregroundStyle(.secondary)
+                    .font(T.micro).foregroundStyle(T.muted)
             }
             .fixedSize()
             .help(session.isProcessAlive

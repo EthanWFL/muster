@@ -36,7 +36,7 @@ struct EnvironmentView: View {
             }
             if env.items.isEmpty {
                 EmptyState(
-                    title: env.plan == nil ? L10n.t("Scanning…") : L10n.t("Nothing to clean up"),
+                    title: env.isScanning ? L10n.t("Scanning…") : L10n.t("Nothing to clean up"),
                     message: L10n.t("Listening ports, orphaned processes and stale worktrees from agent sessions show up here"))
             } else {
                 section(L10n.t("Listening ports"), listeners)
@@ -180,7 +180,7 @@ private struct ReportCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: T.s2) {
             HStack {
-                Text(L10n.t("Cleanup result")).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(T.fg)
+                Text(L10n.t("Cleanup result")).font(T.seg.weight(.semibold)).foregroundStyle(T.fg)
                 Spacer()
                 IconButton(symbol: "xmark", label: L10n.t("Dismiss"), action: dismiss)
                     .disabled(!report.awaitingExit.isEmpty)

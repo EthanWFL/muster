@@ -190,7 +190,7 @@ struct ProjectsView: View {
         VStack(alignment: .leading, spacing: T.s3) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: T.s2) {
-                    Text(project.name).font(.system(size: 24, weight: .semibold)).textSelection(.enabled)
+                    Text(project.name).font(.title.weight(.semibold)).textSelection(.enabled)
                     Text(shortPath(project.path)).font(T.mono).foregroundStyle(T.muted)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }

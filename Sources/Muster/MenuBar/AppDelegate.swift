@@ -17,4 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         model.stop()
     }
+
+    /// Quitting must not silently discard notes, rule edits or configuration drafts.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let areas = model.unsavedAreas
+        guard !areas.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = L10n.t("Quit Muster?")
+        alert.informativeText = L10n.t("Unsaved changes in: %@. Quit anyway?", areas.joined(separator: ", "))
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.t("Quit Anyway"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
 }

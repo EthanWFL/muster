@@ -12,6 +12,16 @@ struct AgentWorkspaceView: View {
                 QuickAgentView(workspace: workspace, configuration: workspace.configuration, onOpenWindow: onOpenWindow)
             } else {
                 VStack(spacing: 0) {
+                    HStack {
+                        SegmentedControl(items: AgentSection.allCases,
+                                         selection: Binding(get: { workspace.section },
+                                                            set: { workspace.selectSection($0) }),
+                                         label: \.title)
+                            .frame(maxWidth: 420)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(T.s3)
+                    Hairline()
                     if workspace.section == .skills {
                         SkillsView(model: workspace.skills, agentID: "all", managedAgents: workspace.managedAgents)
                     } else {

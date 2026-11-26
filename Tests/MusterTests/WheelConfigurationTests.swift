@@ -46,6 +46,36 @@ import MusterCore
         #expect(next.websites == prefs.websites && next.modules == [.projects,.websites,.actions])
     }
 
+    @Test func wheelProjectOrderIsManualAndPersists() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefs = WheelPreferences(defaults: defaults)
+        prefs.reconcileProjects(["b", "a", "c"])
+        #expect(prefs.projectOrder == ["b", "a", "c"])
+        prefs.moveProject("c", by: -1)
+        #expect(prefs.projectOrder == ["b", "c", "a"])
+        prefs.moveProject("b", by: 1)
+        #expect(prefs.projectOrder == ["c", "b", "a"])
+        prefs.reconcileProjects(["a", "c"])
+        #expect(prefs.projectOrder == ["c", "a"])
+        #expect(WheelPreferences(defaults: defaults).projectOrder == ["c", "a"])
+    }
+
+    @Test func wheelOpenerPreferencesSurviveRestart() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefs = WheelPreferences(defaults: defaults)
+        #expect(prefs.projectOpener.isEmpty && prefs.websiteOpener.isEmpty)
+        prefs.setProjectOpener("com.apple.finder")
+        prefs.setWebsiteOpener("com.apple.Safari")
+        let next = WheelPreferences(defaults: defaults)
+        #expect(next.projectOpener == "com.apple.finder")
+        #expect(next.websiteOpener == "com.apple.Safari")
+        #expect(WheelPreferences.installed(WheelPreferences.projectOpeners).first?.id == "")
+    }
+
     @Test func flyoutsFollowSectorDirectionAndFitScreenCorners() {
         let area = CGRect(x: -800, y: 50, width: 800, height: 700)
         let disk = CGRect(x: -450, y: 300, width: 116, height: 116)
@@ -143,5 +173,45 @@ import MusterCore
         _ = try await store.setWheelMember("/project/0", false)
         let snapshot = try await store.setWheelMember("/project/6", true)
         #expect(snapshot.records.filter { $0.wheelMember == true }.count == 6)
+    }
+}
+
+extension WheelConfigurationTests {
+    @Test func wheelSectorsKeepFixedSlotsWhenModulesChange() {
+        #expect(WheelModule.allCases == [.projects, .websites, .clipboard, .actions])
+        let d = ProjectWheelController.diameter
+        func slot(_ x: CGFloat, _ y: CGFloat) -> Int? {
+            WheelSector.index(at: CGPoint(x: x, y: y), count: WheelModule.allCases.count)
+        }
+        #expect(slot(d / 2, 1) == 0)
+        #expect(slot(d - 1, d / 2) == 1)
+        #expect(slot(d / 2, d - 1) == 2)
+        #expect(slot(1, d / 2) == 3)
+    }
+
+    @Test func clickTogglesWheelExpansion() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = PanelModel(projectDefaults: defaults)
+        let wheel = model.projects.wheel
+        wheel.toggle()
+        defer { if wheel.isVisible { wheel.toggle() } }
+        wheel.enteredHub()
+        #expect(wheel.expanded)
+        wheel.toggleExpanded()
+        #expect(!wheel.expanded)
+        wheel.toggleExpanded()
+        #expect(wheel.expanded)
+    }
+
+    @Test func resettingWheelPositionClearsTheSavedAnchor() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(NSStringFromPoint(NSPoint(x: 10, y: 10)), forKey: "MusterProjectWheelCenter")
+        let model = PanelModel(projectDefaults: defaults)
+        model.projects.wheel.resetPosition()
+        #expect(defaults.object(forKey: "MusterProjectWheelCenter") == nil)
     }
 }

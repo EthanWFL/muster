@@ -251,7 +251,7 @@ struct SkillsView: View {
                     VStack(alignment: .leading, spacing: T.s4) {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: T.s2) {
-                                Text(skill.name).font(.system(size: 21, weight: .semibold)).textSelection(.enabled)
+                                Text(skill.name).font(.title2.weight(.semibold)).textSelection(.enabled)
                                 Text(skill.summary).font(T.body).foregroundStyle(T.muted).lineLimit(2)
                             }
                             Spacer(minLength: 0)

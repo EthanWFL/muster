@@ -90,17 +90,22 @@ public enum AgentRegistry {
 
     public static func agent(_ id: String) -> AgentDescriptor? { all.first { $0.id == id } }
 
+    public static var transcriptSources: [any AgentTranscriptSource] { all }
+    public static var configurationSources: [any AgentConfigurationSource] { all }
+    public static var skillSources: [any AgentSkillSource] { all }
+    public static var processSources: [any AgentProcessSource] { all }
+
     public static func skillTargets(home: String = NSHomeDirectory(), environment: [String: String] = ProcessInfo.processInfo.environment) -> [SkillTarget] {
-        all.compactMap { agent in
-            guard let capability = agent.skills else { return nil }
-            let directory = capability.directory.resolve(home: home, environment: environment)
-            let readers = capability.sharedReaders.filter { id in
-                id == agent.id || all.first(where: { $0.id == id })?.skills?.additionalDiscovery.contains {
+        skillSources.compactMap { source in
+            guard let location = source.skillDirectory else { return nil }
+            let directory = location.resolve(home: home, environment: environment)
+            let readers = source.skillSharedReaders.filter { id in
+                id == source.id || all.first(where: { $0.id == id })?.skills?.additionalDiscovery.contains {
                     $0.resolve(home: home, environment: environment) == directory
                 } == true
             }
-            return SkillTarget(id: agent.id, name: agent.name, directory: directory,
-                discoveryDirectories: capability.additionalDiscovery.map { $0.resolve(home: home, environment: environment) },
+            return SkillTarget(id: source.id, name: agent(source.id)?.name ?? source.id, directory: directory,
+                discoveryDirectories: source.skillDiscoveryDirectories.map { $0.resolve(home: home, environment: environment) },
                 sharedReaders: readers)
         }
     }
@@ -114,9 +119,9 @@ public enum AgentRegistry {
 
     public static func transcriptScanners(home: String = NSHomeDirectory(), environment: [String: String] = ProcessInfo.processInfo.environment,
                                          retention: TimeInterval = SessionPolicy.defaultRetention) -> [TranscriptScanner] {
-        all.compactMap { agent in
-            guard let kind = agent.kind, let location = agent.transcript else { return nil }
-            return TranscriptScanner(agent: kind, depth: agent.transcriptDepth,
+        transcriptSources.compactMap { source in
+            guard let kind = source.kind, let location = source.transcriptLocation else { return nil }
+            return TranscriptScanner(agent: kind, depth: source.transcriptScanDepth,
                 projectsRoot: URL(fileURLWithPath: location.resolve(home: home, environment: environment)), retention: retention)
         }
     }

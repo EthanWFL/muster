@@ -14,7 +14,7 @@ struct PillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(T.seg.weight(.medium))
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 10)
             .frame(height: T.controlHeight)
             .foregroundStyle(foreground)
             .background(Capsule().fill(fill))
@@ -103,7 +103,7 @@ struct MiniField: View {
             .font(T.mono)
             .foregroundStyle(T.fg2)
             .focused($focused)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 10)
             .frame(width: width, height: T.controlHeight)
             .background(RoundedRectangle(cornerRadius: T.rInner, style: .continuous).fill(T.card2))
             .overlay(RoundedRectangle(cornerRadius: T.rInner, style: .continuous)
@@ -146,12 +146,26 @@ struct SegmentedControl<Value: Hashable>: View {
                 }
                 .buttonStyle(InteractivePlainButtonStyle(pressedScale: 1))
                 .modifier(OptionalShortcut(key: shortcut?(item)))
+                .accessibilityLabel(label(item))
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left: move(-1)
+                    case .right: move(1)
+                    default: break
+                    }
+                }
             }
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: T.r, style: .continuous).fill(T.segTrack))
         .animation(reduceMotion ? nil : InteractionMotion.selection, value: selection)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func move(_ offset: Int) {
+        guard let index = items.firstIndex(of: selection), !items.isEmpty else { return }
+        selection = items[(index + offset + items.count) % items.count]
     }
 }
 
@@ -179,8 +193,10 @@ struct MiniSwitch: View {
     var body: some View {
         Toggle(label, isOn: $isOn)
             .toggleStyle(.switch)
-            .controlSize(.mini)
+            .controlSize(.small)
             .labelsHidden()
+            .frame(minWidth: T.iconHitSize, minHeight: T.iconHitSize)
+            .contentShape(Rectangle())
             .accessibilityLabel(label)
     }
 }
@@ -415,7 +431,7 @@ struct EmptyState: View {
 
     var body: some View {
         VStack(spacing: T.s1) {
-            Text(title).font(.system(size: 12.5, weight: .medium)).foregroundStyle(T.fg2)
+            Text(title).font(T.seg.weight(.medium)).foregroundStyle(T.fg2)
             if let message {
                 Text(message)
                     .font(T.small)

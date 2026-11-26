@@ -101,23 +101,23 @@ enum T {
     static var rowCompact: CGFloat { comfortable ? 34 : 30 }
     static var rowSingle: CGFloat { comfortable ? 38 : 34 }
     static var rowDouble: CGFloat { comfortable ? 48 : 40 }
-    static var controlHeight: CGFloat { comfortable ? 28 : 24 }
-    static var iconHitSize: CGFloat { comfortable ? 28 : 24 }
+    static var controlHeight: CGFloat { comfortable ? 30 : 28 }
+    static var iconHitSize: CGFloat { comfortable ? 32 : 28 }
 
     // 圆角
     static let rInner: CGFloat = 5
     static let r: CGFloat = 7
 
-    // 字号：只许用这几档，尺寸越多越难对齐
-    static var body: Font { .system(size: comfortable ? 14 : 12.5) }
-    static var small: Font { .system(size: comfortable ? 12 : 11) }
-    static var micro: Font { .system(size: comfortable ? 12 : 10.5) }
-    static var seg: Font { .system(size: comfortable ? 12.5 : 11.5) }
-    static var section: Font { .system(size: comfortable ? 12 : 11, weight: .semibold) }
-    static var mono: Font { .system(size: comfortable ? 12 : 11, design: .monospaced) }
-    static var monoMicro: Font { .system(size: comfortable ? 12 : 10.5, design: .monospaced) }
+    // 字号：语义样式跟随系统辅助功能字号，不再锁死像素值
+    static var body: Font { .body }
+    static var small: Font { .callout }
+    static var micro: Font { .caption }
+    static var seg: Font { .callout }
+    static var section: Font { .caption.weight(.semibold) }
+    static var mono: Font { .system(.callout, design: .monospaced) }
+    static var monoMicro: Font { .system(.caption, design: .monospaced) }
     /// 指示性小图标（chevron、勾选）：最小一档，不再往下开新字号
-    static let glyph = Font.system(size: 10, weight: .semibold)
+    static let glyph = Font.caption2.weight(.semibold)
 }
 
 // MARK: - 发丝线

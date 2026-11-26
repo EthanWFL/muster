@@ -788,3 +788,31 @@
 "OpenAI is rate limiting requests. Try again shortly." = "触发了 OpenAI 的请求限流，请稍后重试。";
 "The OpenAI response ended before it was complete." = "OpenAI 回复在完成前中断。";
 "OpenAI could not complete the request. Try again shortly." = "OpenAI 未能完成请求，请稍后重试。";
+
+"Open projects with" = "打开项目使用";
+"Open websites with" = "打开网页使用";
+"Move earlier" = "前移";
+"Move later" = "后移";
+"Open with" = "打开方式";
+"The selected project app is not installed. Opened with the system default." = "所选项目应用未安装，已使用系统默认方式打开。";
+"The selected browser is not installed. Opened with the system default." = "所选浏览器未安装，已使用系统默认方式打开。";
+"Session scan" = "会话扫描";
+"Session scan failed" = "会话扫描失败";
+"Try again" = "重试";
+"Scanning sessions…" = "正在扫描会话…";
+"Reading local Agent transcripts." = "正在读取本地 Agent 记录。";
+"Quit Muster?" = "退出 Muster？";
+"Unsaved changes in: %@. Quit anyway?" = "以下内容有未保存的修改：%@。仍要退出吗？";
+"Quit Anyway" = "仍要退出";
+"Session details" = "会话详情";
+"Instructions" = "共享规则";
+"Skill draft" = "技能草稿";
+"Roomier rows and controls." = "更宽松的行高和控件间距。";
+"System default" = "系统默认";
+
+"Jump to" = "跳转到";
+
+"Reset position" = "重置位置";
+"Click to open · Drag to move." = "点击展开 · 拖动移动";
+"Copy path" = "复制路径";
+"Copy link" = "复制链接";

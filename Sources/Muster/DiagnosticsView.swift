@@ -5,7 +5,13 @@ import SwiftUI
 final class DiagnosticsModel: ObservableObject {
     @Published private(set) var reports: [AgentDiagnostic] = []
     @Published private(set) var isChecking = false
+    @Published private(set) var scanFailures: [String] = []
     private var managedAgentIDs: Set<String>?
+
+    /// Session scans fail silently in the list; surface the reason here instead.
+    func recordScanFailures(_ failures: [String]) {
+        scanFailures = failures
+    }
 
     func restrictToAgents(_ ids: Set<String>) {
         managedAgentIDs = ids
@@ -30,6 +36,20 @@ struct DiagnosticsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: T.s2) {
+            if !model.scanFailures.isEmpty {
+                SectionTitle(text: L10n.t("Session scan"))
+                Card {
+                    ForEach(model.scanFailures.prefix(3), id: \.self) { failure in
+                        Text(failure)
+                            .font(T.small)
+                            .foregroundStyle(T.red)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, T.s3)
+                            .padding(.vertical, T.s1)
+                    }
+                }
+            }
             HStack {
                 SectionTitle(text: L10n.t("Environment diagnostics"))
                 Button(model.isChecking ? L10n.t("Checking…") : L10n.t("Check environment")) { model.check() }

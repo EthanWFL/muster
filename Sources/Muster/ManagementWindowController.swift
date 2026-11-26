@@ -72,7 +72,7 @@ final class ManagementWindowController: NSWindowController, NSWindowDelegate {
                                                                 size: NSSize(width: 100, height: 28)))
             window.addTitlebarAccessoryViewController(accessory(
                 PanelHeaderActions(model: model, presentation: .window).padding(.trailing, T.s3), edge: .right,
-                size: NSSize(width: 68, height: 28)))
+                size: NSSize(width: 4 * T.iconHitSize + 4 * T.s2 + T.s3, height: 28)))
             window.minSize = Self.minimumSize
             window.isReleasedWhenClosed = false
             window.delegate = self
@@ -146,7 +146,7 @@ private struct WindowToolbarBrand: View {
     var body: some View {
         HStack(spacing: 8) {
             BrandMark(isPanelOpen: surface.isVisible)
-            Text("Muster").font(.system(size: 13, weight: .semibold))
+            Text("Muster").font(T.body.weight(.semibold))
         }
         .frame(width: 100, height: 28, alignment: .leading)
     }
